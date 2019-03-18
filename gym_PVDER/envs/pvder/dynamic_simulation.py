@@ -10,8 +10,8 @@ import logging
 
 from scipy.integrate import odeint
 ####from graphviz import Digraph
-from utilities import SimulationUtilities
-import utility_functions as utility_functions
+from gym_PVDER.envs.pvder.utilities import SimulationUtilities
+from gym_PVDER.envs.pvder import utility_functions
 
 class ModelUtilities():
     """Class for model wide utilities."""

@@ -3,8 +3,8 @@ import numpy as np
 import math
 import cmath
 import six
-from utilities import SimulationUtilities
-import utility_functions as utility_functions
+from gym_PVDER.envs.pvder.utilities import SimulationUtilities
+from gym_PVDER.envs.pvder import utility_functions
 
 class Grid(SimulationUtilities):
     """ Class for grid"""

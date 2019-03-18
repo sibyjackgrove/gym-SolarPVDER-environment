@@ -3,7 +3,7 @@ import math
 import operator
 import six
 import logging
-import utility_functions as utility_functions
+from gym_PVDER.envs.pvder import utility_functions
 
 class SimulationEvents():
     """ Utility class for events."""

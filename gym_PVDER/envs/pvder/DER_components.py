@@ -8,9 +8,9 @@ import pdb
 import warnings
 import logging
 from scipy.optimize import fsolve, minimize
-from grid_components import Grid
-from utilities import SimulationUtilities
-import utility_functions as utility_functions
+from gym_PVDER.envs.pvder.grid_components import Grid
+from gym_PVDER.envs.pvder.utilities import SimulationUtilities
+from gym_PVDER.envs.pvder import utility_functions
 
 
 class PV_module(object):

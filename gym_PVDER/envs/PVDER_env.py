@@ -6,14 +6,15 @@ import sys
 import os
 import logging
 
-sys.path.insert(0,os.path.dirname(os.path.abspath(__file__))+'\\pvder') #Otherwise Python 3 won't find module
+#sys.path.insert(0,os.path.dirname(os.path.abspath(__file__))+'\\pvder') #Otherwise Python 3 won't find module
+
 np.set_printoptions(precision=2)  #for setting number of decimal places when printing numpy arrays
 
-from DER_components import SolarPV_DER
-from grid_components import Grid
-from simulation_events import SimulationEvents
-from dynamic_simulation import GridSimulation
-import utility_functions as utility_functions
+from gym_PVDER.envs.pvder.DER_components import SolarPV_DER  #Python 3 need full path to find module
+from gym_PVDER.envs.pvder.grid_components import Grid
+from gym_PVDER.envs.pvder.simulation_events import SimulationEvents
+from gym_PVDER.envs.pvder.dynamic_simulation import GridSimulation
+from gym_PVDER.envs.pvder import utility_functions
 
 class PVDER(gym.Env):
     metadata = {'render.modes': ['human']}
