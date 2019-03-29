@@ -7,7 +7,6 @@ Solar photovoltaic distributed energy resources (PV-DER) are power electronic in
 
 ## Basics
 The dynamics of the DER are modelled using dynamic phasors. One step is equivalent to one cycle (0.016 s).
-
 ## Installation
 You can install the environment using following commands:
 ```
@@ -22,6 +21,13 @@ import gym
 import gym_PVDER
 env = gym.make('PVDER-v0')
 ```
+Try it out in Google Colab:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sibyjackgrove/gym-SolarPVDER-environment/blob/master/examples/gym_PVDER_environment_import_test.ipynb)
+
+The environment can also be used with TensorFlow agents. Try out the demo below which trains a DQN agent using the environment:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sibyjackgrove/gym-SolarPVDER-environment/blob/master/examples/gym_PVDER_environment_tf_agents_DQN_demo.ipynb)
 ## Citation
 If you use this code please cite it as:
 ```
