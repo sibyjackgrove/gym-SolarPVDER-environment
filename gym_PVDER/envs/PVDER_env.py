@@ -30,12 +30,15 @@ class PVDER(gym.Env):
     
     objective_dict = {'Q_ref_+':{'Q_ref':0.1},'Q_ref_-':{'Q_ref':-0.1}}
     
-    def __init__(self,max_time = 10.0):
-        
+    def __init__(self,max_time = 10.0,goal_list=['Vdc_deviation','Q_control'],DISCRETE_REWARD=True):        
         """
-        self.state = 0
+        max_time: Scalar specifiying maximum simulation time in seconds for PV-DER model.
+        goal_list: List with agent goals.
         """
         self.max_time = max_time
+        self.goal_list = goal_list
+        self.DISCRETE_REWARD = DISCRETE_REWARD
+        
         self.setup_PVDER_simulation()
         
         self.steps  = 0
@@ -79,9 +82,9 @@ class PVDER(gym.Env):
                 self.reward = -100.0 #Discourage convergence failures using large penalty
 
             else:
-                #self.reward = -(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2 - (self.sim.PV_model.S.real - self.sim.PV_model.S_PCC.real)**2
-                #self.reward = -(self.sim.PV_model.S_PCC.imag - 0.1)**2 -(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2
-                self.reward = -(self.sim.PV_model.Ppv-0.85)**2 -(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2
+                self.reward = self.reward_calc()
+
+                                    
                 self.sim.tStart = self.sim.tStop                
             
             if self.sim.tStart >= self.max_time or self.convergence_failure:
@@ -93,27 +96,43 @@ class PVDER(gym.Env):
                     self.render()
         
         return np.array(self.state), self.reward, self.done, {}
-    """
-    def step(self, action):
-        
-                
-        else:
-            self.state = self.state + action
-            self.steps = self.steps + 1
-            if self.state == 20:
-                self.done = True
-            
-            elif self.state == 21:
-                self.convergence = False 
-                self.done = True
-            
-            elif self.state%2 == 0 or self.state%5 == 0:
-                self.reward = 1
+
+    def reward_calc(self):
+        """Calculate reward"""
+        _Qtarget = 0.1
+        _Ppvtarget = 0.95
+        _reward = []
+        if 'Vdc_deviation' in self.goal_list:
+            if abs(self.sim.PV_model.Vdc-self.sim.PV_model.Vdc_ref)/self.sim.PV_model.Vdc_ref <= 0.02:
+                _reward.append(1)
+            elif abs(self.sim.PV_model.Vdc-self.sim.PV_model.Vdc_ref)/self.sim.PV_model.Vdc_ref >= 0.05:
+                _reward.append(-5)
             else:
-            
-              self.reward = -1
+                _reward.append(-1)
+                                #self.reward = (self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2
+                #self.reward = -(self.sim.PV_model.Ppv-0.85)**2 -(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2
         
-    """
+        if 'Q_control' in self.goal_list:
+            if self.DISCRETE_REWARD:
+                if abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/_Qtarget <= 0.01:
+                    _reward.append(1)
+                elif abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/_Qtarget >= 0.05:
+                    _reward.append(-5)
+                else:
+                    _reward.append(-1)
+            else:
+                _reward.append(-(self.sim.PV_model.S_PCC.imag - _Qtarget)**2)
+        
+        if 'Ppv_control' in self.goal_list:
+            if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget <= 0.01:
+                _reward.append(1)
+            if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget >= 0.03:
+                _reward.append(-5)
+            else:
+                _reward.append(-1)       
+        
+        return sum(_reward)
+    
     def reset(self):
         #self.state = 0
         print('----Resetting environment and creating new PV-DER simulation----')
