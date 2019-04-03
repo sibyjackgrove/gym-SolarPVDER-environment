@@ -75,9 +75,11 @@ class PVDER(gym.Env):
             
             if 'Q_control' in self.goal_list:
                 self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
+                print('Q_control',self.sim.PV_model.Q_ref)
             elif 'Ppv_control' in self.goal_list:
                 self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
             else:   #Do nothing
+                print('no_control')
                 pass
             
             try:
@@ -187,6 +189,7 @@ class PVDER(gym.Env):
         
         self.sim.tStop = 4.0
         self.sim.run_simulation()  #Run simulation to bring environment to steady state
+        PV_model.VAR_EXTERNAL = True  #Enable VAR reference manipulation through outside program
         self.sim.DEBUG_SOLVER = False #Give information on solver convergence
         self.sim.tInc = 1/60.0        
         #print(self.sim.t)
