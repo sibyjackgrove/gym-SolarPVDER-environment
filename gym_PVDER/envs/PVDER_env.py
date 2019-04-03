@@ -72,19 +72,23 @@ class PVDER(gym.Env):
             else:
                     _Qref = 0.0
                     _Vdcref = 0.0 #Volts (DC)
-                    
-            #self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
-            self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
+            
+            if 'Q_control' in self.goal_list:
+                self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
+            elif 'Ppv_control' in self.goal_list:
+                self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
+            else:   #Do nothing
+                pass
+            
             try:
                 self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,[self.sim.tStart,self.sim.tStop])
+            
             except ValueError:
                 self.convergence_failure = True
                 self.reward = -100.0 #Discourage convergence failures using large penalty
-
-            else:
+            
+            else:  #If solution converges calculate reward
                 self.reward = self.reward_calc()
-
-                                    
                 self.sim.tStart = self.sim.tStop                
             
             if self.sim.tStart >= self.max_time or self.convergence_failure:
