@@ -8,12 +8,13 @@ Solar photovoltaic distributed energy resources (PV-DER) are power electronic in
 ## Basics
 The dynamics of the DER are modelled using dynamic phasors. One step is equivalent to one cycle (0.016 s).
 ## Installation
-You can install the environment using following commands:
+First install the [Solar PVDER simulation utility.](https://github.com/sibyjackgrove/SolarPV-DER-simulation-utility) Then you can install the PVDER environment using following commands:
 ```
 git clone https://github.com/sibyjackgrove/gym-SolarPVDER-environment.git
 cd gym-SolarPVDER-environment
 pip install -e .
 ```
+Other dependencies: OpenAI Gym, Numpy, SciPy
 ## Using the environment
 The environment can be instantiated just like any other OpenAI Gym environment as show below:
 ```
