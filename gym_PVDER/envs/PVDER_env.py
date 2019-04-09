@@ -6,15 +6,32 @@ import sys
 import os
 import logging
 
-#sys.path.insert(0,os.path.dirname(os.path.abspath(__file__))+'\\pvder') #Otherwise Python 3 won't find module
+import importlib.util
+import sys
+
+# For illustrative purposes.
+package_name = 'pvder'
+
+spec = importlib.util.find_spec(package_name)
+if spec is None:
+    print(package_name +" is not installed! Please install the module from https://github.com/sibyjackgrove/SolarPV-DER-simulation-utility")
 
 np.set_printoptions(precision=2)  #for setting number of decimal places when printing numpy arrays
 
+"""
 from gym_PVDER.envs.pvder.DER_components import SolarPV_DER  #Python 3 need full path to find module
 from gym_PVDER.envs.pvder.grid_components import Grid
 from gym_PVDER.envs.pvder.simulation_events import SimulationEvents
 from gym_PVDER.envs.pvder.dynamic_simulation import GridSimulation
 from gym_PVDER.envs.pvder import utility_functions
+"""
+from pvder.DER_components_single_phase  import SolarPV_DER_SinglePhase  #Python 3 need full path to find module
+from pvder.DER_components_three_phase  import SolarPV_DER_ThreePhase
+from pvder.grid_components import Grid
+from pvder.simulation_events import SimulationEvents
+from pvder.dynamic_simulation import GridSimulation
+from pvder import utility_functions
+
 
 class PVDER(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -154,14 +171,16 @@ class PVDER(gym.Env):
     
     def render(self, mode='human'):
         
-        _state = {'ia':np.array(self.sim.PV_model.ia),
-                  'ma':np.array(self.sim.PV_model.ma),
-                  'Vdc':np.array(self.sim.PV_model.Vdc),
-                  'Ppv':np.array(self.sim.PV_model.Ppv),
-                  'S_inverter':np.array(self.sim.PV_model.S),
-                  'S_PCC':np.array(self.sim.PV_model.S_PCC),
-                  'Q_ref':np.array(self.sim.PV_model.Q_ref),
-                  'Vdc_ref':np.array(self.sim.PV_model.Vdc_ref),
+        _state = {'ma':np.array(self.sim.PV_model.ma),
+                  'ia':np.array(self.sim.PV_model.ia*self.sim.Ibase),                  
+                  'Vdc':np.array(self.sim.PV_model.Vdc*self.sim.PV_model.Vdcbase),
+                  'vta':np.array(self.sim.PV_model.vta*self.sim.Vbase),
+                  'va':np.array(self.sim.PV_model.va*self.sim.Vbase),
+                  'Ppv':np.array(self.sim.PV_model.Ppv*self.sim.Sbase),
+                  'S_inverter':np.array(self.sim.PV_model.S*self.sim.Sbase),
+                  'S_PCC':np.array(self.sim.PV_model.S_PCC*self.sim.Sbase),
+                  'Q_ref':np.array(self.sim.PV_model.Q_ref*self.sim.Sbase),
+                  'Vdc_ref':np.array(self.sim.PV_model.Vdc_ref*self.sim.PV_model.Vdcbase),
                   'tStart':np.array(self.sim.tStart)
                  }
         print('State:{},Reward:{:.4f}'.format(_state,self.reward))
@@ -170,8 +189,8 @@ class PVDER(gym.Env):
         """Setup simulation environment."""
         
         events = SimulationEvents()
-        grid = Grid(events=events,standAlone=False)
-        PV_model = SolarPV_DER(grid_model=grid,events=events,
+        grid = Grid(events=events)
+        PV_model = SolarPV_DER_ThreePhase(grid_model=grid,events=events,
                                standAlone=False,Sinverter_rated = 50.0e3,
                                gridVoltagePhaseA=(.50+0j),
                                gridVoltagePhaseB=(-.25-.43301270j),
@@ -181,11 +200,11 @@ class PVDER(gym.Env):
         PV_model.LVRT_ENABLE = False  #Disconnects PV-DER using ride through settings during voltage anomaly
         PV_model.VAR_EXTERNAL = False
         PV_model.Vdc_EXTERNAL = True
-        self.sim = GridSimulation(grid_model=grid,PV_model=PV_model,simulation_events = events)
+        self.sim = GridSimulation(grid_model=grid,PV_model=PV_model,events = events)
         self.sim.jacFlag = True      #Provide analytical Jacobian to ODE solver
         self.sim.DEBUG_SOLVER = False #Give information on solver convergence
         
-        self.sim.tInc = 1/120.0
+        #self.sim.tInc = 1/120.0
         
         self.sim.tStop = 4.0
         self.sim.run_simulation()  #Run simulation to bring environment to steady state
