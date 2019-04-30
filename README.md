@@ -6,7 +6,10 @@ Solar photovoltaic distributed energy resources (PV-DER) are power electronic in
 ![schematic of PV-DER](PVDER_schematic.png)
 
 ## Basics
-The dynamics of the DER are modelled using dynamic phasors. One step is equivalent to one cycle (0.016 s).
+The dynamics of the DER are modelled using dynamic phasors. One step in the environment is equivalent to **n** simulation time steps and each simulation time step is one half-cycle (1/120 s).
+### Events in the environment
+There are two types of perturbations in the environment: a) Change in grid voltage magnitude b) Change in solar insolation.
+
 ## Installation
 First install the [Solar PVDER simulation utility.](https://github.com/sibyjackgrove/SolarPV-DER-simulation-utility) Then you can install the PVDER environment using following commands:
 ```
@@ -22,7 +25,11 @@ import gym
 import gym_PVDER
 env = gym.make('PVDER-v0')
 ```
-Try it out in Google Colab:
+### Available user options
+* DISCRETE_REWARD: If this is set to *True* discrete rewards (i.e. +1, -1, -5 etc) will be returned every time step. Otherwise reward will be the error between goals and actual values.
+ 
+### Try it out in Google Colab:
+Create environment and make a random agent interact with it:
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sibyjackgrove/gym-SolarPVDER-environment/blob/master/examples/gym_PVDER_environment_import_test.ipynb)
 
@@ -36,7 +43,7 @@ If you use this code please cite it as:
   title = {{gym-SolarPVDER-environment}: A environment for solar photovoltaic distributed energy resources},
   author = "{Siby Jose Plathottam}",
   howpublished = {\url{https://github.com/sibyjackgrove/gym-SolarPVDER-environment}},
-  url = "https://github.com/tensorflow/agents",
+  url = "https://github.com/sibyjackgrove/gym-SolarPVDER-environment",
   year = 2019,
   note = "[Online; accessed 18-March-2019]"
 }
