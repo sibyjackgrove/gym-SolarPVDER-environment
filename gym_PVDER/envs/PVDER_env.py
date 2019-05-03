@@ -21,7 +21,7 @@ if spec is None:
 
 from pvder.DER_components_single_phase  import SolarPV_DER_SinglePhase  #Python 3 need full path to find module
 from pvder.DER_components_three_phase  import SolarPV_DER_ThreePhase
-from pvder.grid_components import Grid
+from pvder.grid_components import Grid,BaseValues
 from pvder.simulation_events import SimulationEvents
 from pvder.simulation_utilities import SimulationResults
 from pvder.dynamic_simulation import DynamicSimulation
@@ -44,29 +44,31 @@ class PVDER(gym.Env):
     events_spec = {'insolation':{'delay':0.5,'time_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
                    'voltage':{'delay':1.0,'time_step':1.0,'min':0.95,'max':1.02,'ENABLE':True}}  #Time delay between events
     
-    simulation_spec = {'simulation_time_step':(1/60),'simulation_time_per_environment_step': (1/60)*30}
-    goal_list=['Q_control','voltage_regulation'] #List with agent goals. #'Vdc_deviation',
+    simulation_spec = {'sim_time_step':(1/60),'sim_time_per_env_step': (1/60)*30}
     
-    #time_taken_per_step  = (1/60)*15 #Simulation time for each step in environment
+    reward_spec={'goal_list':['voltage_regulation','power_regulation','Q_control','Vdc_control'],
+                 'reference_values':{'P_ref':0.95}} #List with agent goals. #,
     
-    def __init__(self,max_time = 10.0,DISCRETE_REWARD=True):        
+    def __init__(self, n_sim_time_steps_per_environment_step = 30, max_simulation_time=20.0,
+                 DISCRETE_REWARD=True, goal_list=['voltage_regulation']):   
         """
         max_time: Scalar specifiying maximum simulation time in seconds for PV-DER model.
         goal_list: List with agent goals.
         """
-        self.max_time = max_time
-        #self.goal_list = goal_list
+        #super().__init__(DISCRETE_REWARD=DISCRETE_REWARD)
+        
+        self.simulation_spec['sim_time_per_env_step'] = self.simulation_spec['sim_time_step']*n_sim_time_steps_per_environment_step
+        
+        self.max_simulation_time_user = max_simulation_time
+        self.goal_list = goal_list
+        
         self.DISCRETE_REWARD = DISCRETE_REWARD
         
-        self.setup_PVDER_simulation()
+        #self.setup_PVDER_simulation()
         
-        self.steps  = 0
-        self.reward = 0
-        
-        self.done = False
-        self.convergence_failure = False
+        self.initialize_environment_variables()
         logging.getLogger().setLevel(logging.INFO)
-
+    
     
     def step(self, action):
         
@@ -80,11 +82,11 @@ class PVDER(gym.Env):
             print('Simulation stopped due to converge failure at {} s - Reset environment to start new simulation!'.format(self.sim.tStart))
         
         else:
-            self.sim.tStop = self.sim.tStart + self.simulation_spec['simulation_time_per_environment_step'] #
+            self.sim.tStop = self.sim.tStart + self.simulation_spec['sim_time_per_env_step'] #
             self.steps = self.steps +1
             #t = [self.sim.tStart,self.sim.tStop]
             t = self.sim.t_calc()
-            
+            """
             if action == 0:
                     _Qref = - 0.1e3  #VAR
                     _Vdcref = -0.1 #Volts (DC)
@@ -96,6 +98,7 @@ class PVDER(gym.Env):
                     _Vdcref = 0.0 #Volts (DC)
             else:
                 print('{} is an invalid action'.format(action))
+                
             if 'Q_control' or 'voltage_regulation' in self.goal_list:
                 self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
                 
@@ -104,14 +107,15 @@ class PVDER(gym.Env):
             else:   #Do nothing
                 print('no_control')
                 pass
-            
+            """
+            self.action_calc(action)
             try:
                 solution,info = self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,t)
                 
                 #self.sim.run_simulation()
                 
             except ValueError:
-                self.convergence_failure = True
+                self.CONVERGENCE_FAILURE = True
                 self.reward = -100.0 #Discourage convergence failures using large penalty
             
             else:  #If solution converges calculate reward
@@ -121,39 +125,67 @@ class PVDER(gym.Env):
                 self.reward = self.reward_calc()
                 self.sim.tStart = self.sim.tStop                
             
-            if self.sim.tStart >= self.max_time or self.convergence_failure:
+            if self.sim.tStart >= self.max_simulation_time or self.CONVERGENCE_FAILURE:
                 self.done = True
-                if not self.convergence_failure:
-                    print('Simulation time limit exceeded in {} at {:.2f} - ending simulation!'.format(self.sim.name,self.sim.tStart))
+                if not self.CONVERGENCE_FAILURE:
+                    print('Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.sim.name,self.sim.tStart, self.steps))
                 else:
                     print("Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStart))
         
         return np.array(self.state), self.reward, self.done, {}
 
+    def action_calc(self,action):
+        """Calculate action"""
+        
+        if action == 0:
+            _Qref = - 0.1e3  #VAR
+            _Vdcref = -0.1 #Volts (DC)
+        elif action == 1:
+            _Qref =  0.1e3
+            _Vdcref = 0.1 #Volts (DC)
+        elif action == 2:
+            _Qref = 0.0
+            _Vdcref = 0.0 #Volts (DC)
+        else:
+            print('{} is an invalid action'.format(action))
+            
+        if 'voltage_regulation' in self.goal_list:
+            self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
+                
+        elif 'power_regulation' in self.goal_list:
+            self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
+        
+        elif 'Q_control' not in self.goal_list and 'Vdc_control' not in self.goal_list:   #Do nothing
+            print('No goals were given to agent, so no control action is being taken.')
+            pass
+    
+    
     def reward_calc(self):
         """Calculate reward"""
         _Qtarget = self.sim.PV_model.Q_ref
-        _Ppvtarget = 0.95
+        _Vdctarget = self.sim.PV_model.Vdc_ref
+        _Ptarget = self.reward_spec['reference_values']['P_ref']
         _reward = []
         
-        if 'Vdc_deviation' in self.goal_list:
-            if abs(self.sim.PV_model.Vdc-self.sim.PV_model.Vdc_ref)/self.sim.PV_model.Vdc_ref <= 0.02:
-                _reward.append(1)
-            elif abs(self.sim.PV_model.Vdc-self.sim.PV_model.Vdc_ref)/self.sim.PV_model.Vdc_ref >= 0.05:
-                _reward.append(-5)
+        if 'Vdc_control' in self.goal_list:
+            if self.DISCRETE_REWARD:
+                
+                if abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget <= 0.02:
+                    _reward.append(1)
+                elif abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget >= 0.05:
+                    _reward.append(-5)
+                else:
+                    _reward.append(-1)
             else:
-                _reward.append(-1)
-                                #self.reward = (self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2
-                #self.reward = -(self.sim.PV_model.Ppv-0.85)**2 -(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2
-        
+                _reward.append(-(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2)
+                
         if 'Q_control' in self.goal_list:
             if self.DISCRETE_REWARD:
-                print(self.sim.PV_model.S_PCC.imag, _Qtarget)
+                
                 if abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) <= 0.01:
                     _reward.append(1)
                 elif abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) >= 0.05:
                     _reward.append(-5)
-                    
                 else:
                     _reward.append(-1)
             else:
@@ -161,18 +193,17 @@ class PVDER(gym.Env):
         
         if 'voltage_regulation' in self.goal_list:
             if self.DISCRETE_REWARD:
-                print(self.sim.PV_model.Vrms*500,self.sim.PV_model.Vrms_ref*500)
+                
                 if abs(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)/abs(self.sim.PV_model.Vrms_ref) <= 0.01:
                     _reward.append(1)
                 elif abs(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)/abs(self.sim.PV_model.Vrms_ref) >= 0.05:
                     _reward.append(-5)
-                    
                 else:
                     _reward.append(-1)
             else:
-                _reward.append(-(self.sim.PV_model.S_PCC.imag - _Qtarget)**2)
+                _reward.append(-(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)**2)
         
-        if 'Ppv_control' in self.goal_list:
+        if 'power_regulation' in self.goal_list:
             if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget <= 0.01:
                 _reward.append(1)
             if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget >= 0.03:
@@ -182,16 +213,31 @@ class PVDER(gym.Env):
         
         return sum(_reward)
     
+    def initialize_environment_variables(self):
+        """Initialize environment variables."""
+        
+        self.steps  = 0
+        self.reward = 0
+        
+        self.done = False
+        self.CONVERGENCE_FAILURE = False
+    
     def reset(self):
         #self.state = 0
         print('----Resetting environment and creating new PV-DER simulation----')
-        self.cleanup_PVDER_simulation()
-        self.setup_PVDER_simulation()
+        print('Max environment steps:',self.spec.max_episode_steps)
         
-        self.reward = 0.0
-        self.done = False
-        self.convergence_failure = False
-        self.steps  = 0
+        #if self.sim in locals(): #Check if simulation object exists
+        if hasattr(self, 'sim'):
+            print('The existing simulation object {} will be removed from environment.'.format(self.sim.name))
+            self.cleanup_PVDER_simulation()
+            
+        else:
+            print('No simulation object exists in environment!')
+        
+        self.initialize_environment_variables()
+        self.setup_PVDER_simulation()
+
         print('Environment was reset and {} attached'.format(self.sim.name))
         return np.array(self.state)
     
@@ -225,17 +271,19 @@ class PVDER(gym.Env):
     def setup_PVDER_simulation(self):
         """Setup simulation environment."""
         
+        self.max_simulation_time = self.max_simulation_time_user
+        
         events = SimulationEvents()
-        grid = Grid(events=events)
-        PV_model = SolarPV_DER_ThreePhase(grid_model = grid,events=events,
-                                          standAlone = True, Sinverter_rated = 50.0e3,
-                                          STEADY_STATE_INITIALIZATION=True) 
-                               #gridVoltagePhaseA=(.50+0j),gridVoltagePhaseB=(-.25-.43301270j),gridVoltagePhaseC=(-.25+.43301270j),
+        grid_model = Grid(events=events)
+        PVDER_model = SolarPV_DER_ThreePhase(grid_model = grid_model,events=events,
+                                             Sinverter_rated = 50.0e3,
+                                             standAlone = True,STEADY_STATE_INITIALIZATION=True)                                
 
-        PV_model.LVRT_ENABLE = False  #Disconnects PV-DER using ride through settings during voltage anomaly
-        PV_model.DO_EXTRA_CALCULATIONS = True
+        PVDER_model.LVRT_ENABLE = False  #Disconnects PV-DER using ride through settings during voltage anomaly
+        PVDER_model.DO_EXTRA_CALCULATIONS = True
         #PV_model.Vdc_EXTERNAL = True
-        self.sim = DynamicSimulation(PV_model=PV_model,events = events,grid_model=grid,LOOP_MODE = True,COLLECT_SOLUTION=True)
+        self.sim = DynamicSimulation(PV_model=PVDER_model,events = events,grid_model=grid_model,
+                                     LOOP_MODE = True,COLLECT_SOLUTION=True)
         self.results = SimulationResults(simulation = self.sim)
         self.results.PER_UNIT = False
         self.results.font_size = 18
@@ -251,9 +299,9 @@ class PVDER(gym.Env):
         self.sim.LOOP_MODE = True
         """
         self.create_random_events()
-        PV_model.Qref_EXTERNAL = True  #Enable VAR reference manipulation through outside program
+        PVDER_model.Qref_EXTERNAL = True  #Enable VAR reference manipulation through outside program
         self.sim.DEBUG_SOLVER = False #Give information on solver convergence
-        self.sim.tInc = self.simulation_spec['simulation_time_step'] #1/60.0 #self.time_taken_per_step #     
+        self.sim.tInc = self.simulation_spec['sim_time_step'] #1/60.0 #self.time_taken_per_step #     
         self.sim.reset_stored_trajectories()
         #print(self.sim.t)
    
@@ -261,13 +309,13 @@ class PVDER(gym.Env):
         """Create random events."""
         
         if 'insolation' in self.events_spec.keys() and self.events_spec['insolation']['ENABLE']:
-            t_events = np.arange(self.events_spec['insolation']['delay'],self.max_time,self.events_spec['insolation']['time_step'])
+            t_events = np.arange(self.events_spec['insolation']['delay'],self.max_simulation_time,self.events_spec['insolation']['time_step'])
             for t in t_events:
                 insolation = self.events_spec['insolation']['min'] + random.random()*(self.events_spec['insolation']['max']-self.events_spec['insolation']['min'])
                 self.sim.simulation_events.add_solar_event(t,insolation)
         
         if 'voltage' in self.events_spec.keys() and self.events_spec['voltage']['ENABLE']:
-            t_events = np.arange(self.events_spec['voltage']['delay'],self.max_time,self.events_spec['voltage']['time_step'])
+            t_events = np.arange(self.events_spec['voltage']['delay'],self.max_simulation_time,self.events_spec['voltage']['time_step'])
             for t in t_events:
                 voltage = self.events_spec['voltage']['min'] + random.random()*(self.events_spec['voltage']['max']-self.events_spec['voltage']['min']) 
                 self.sim.simulation_events.add_grid_event(t,voltage)
@@ -286,6 +334,35 @@ class PVDER(gym.Env):
                   self.sim.PV_model.S_PCC.real,self.sim.PV_model.S_PCC.imag,
                   self.sim.PV_model.Vdc,self.sim.PV_model.Ppv,
                   self.sim.PV_model.Vdc_ref,self.sim.PV_model.Q_ref,
-                  self.sim.tStart/self.max_time)        
+                  self.sim.tStart/self.max_simulation_time)        
     
         return _state
+    
+    @property
+    def max_simulation_time(self):
+        return self.__max_simulation_time
+    
+    @property
+    def goal_list(self):
+        return self.__goal_list
+    
+    ## the attribute name and the method name must be same which is used to set the value for the attribute
+    @max_simulation_time.setter
+    def max_simulation_time(self,max_simulation_time):
+        if max_simulation_time < 1:
+            self.__max_simulation_time = 1
+        elif max_simulation_time > self.spec.max_episode_steps*self.simulation_spec['sim_time_per_env_step']: #self._max_episode_steps
+            print('Specifed maximum simulation time is {}, but allowable simulation time is only {}'.format(max_simulation_time,self.spec.max_episode_steps*self.simulation_spec['sim_time_per_env_step']))
+            self.__max_simulation_time = self.spec.max_episode_steps*self.simulation_spec['sim_time_per_env_step'] #self.max_episode_steps*
+        else:
+            self.__max_simulation_time = max_simulation_time
+            
+    @goal_list.setter
+    def goal_list(self,goal_list):
+        
+        if set(goal_list).issubset(self.reward_spec['goal_list']):
+            self.__goal_list = goal_list
+        else:
+            print('Goal list:{} contains invalid elements, available elements are:{}'.format(goal_list,self.reward_spec['goal_list']))
+                    
+        return self.__goal_list
