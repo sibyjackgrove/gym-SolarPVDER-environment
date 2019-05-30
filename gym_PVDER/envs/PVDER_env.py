@@ -75,13 +75,16 @@ class PVDER(gym.Env):
         if self.steps == 0:
             print('New episode started with tStart = {} s'.format(self.sim.tStart))
         
-        if self.done == True and not self.convergence_failure:
+        if self.done and self.sim.tStop >= self.max_simulation_time:
             print('Simulation completed - Reset environment to start new simulation!')
         
-        elif self.done == True and self.convergence_failure:
-            print('Simulation stopped due to converge failure at {} s - Reset environment to start new simulation!'.format(self.sim.tStart))
+        elif self.done and self.CONVERGENCE_FAILURE:
+            print('Simulation stopped due to converge failure at {} s - Reset environment to start new simulation!'.format(self.sim.tStop))
         
-        else:
+        elif self.done and self.RUNTIME_ERROR:
+            print('Simulation stopped due to run time error failure at {} s - Check code for error in logic!'.format(self.sim.tStop))
+        
+        elif not self.done:
             self.sim.tStop = self.sim.tStart + self.simulation_spec['sim_time_per_env_step'] #
             self.steps = self.steps +1
             #t = [self.sim.tStart,self.sim.tStop]
@@ -110,32 +113,42 @@ class PVDER(gym.Env):
             """
             self.action_calc(action)
             try:
-                solution,info = self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,t)
+                solution,info,ConvergeFlag = self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,t)
                 
                 #self.sim.run_simulation()
                 
             except ValueError:
-                self.CONVERGENCE_FAILURE = True
-                self.reward = -100.0 #Discourage convergence failures using large penalty
+                if not ConvergeFlag:
+                    self.CONVERGENCE_FAILURE = True
+                    self.reward = -100.0 #Discourage convergence failures using large penalty
+                else:
+                    self.RUNTIME_ERROR = True  
+                    self.reward = 0.0 #Not a convergence failure
             
             else:  #If solution converges calculate reward
+                assert ConvergeFlag,'Convergence flag should be true to calculate reward!'
                 if self.sim.COLLECT_SOLUTION:
                     self.sim.collect_solution(solution,t)
                     
                 self.reward = self.reward_calc()
                 self.sim.tStart = self.sim.tStop                
             
-            if self.sim.tStart >= self.max_simulation_time or self.CONVERGENCE_FAILURE:
+            if self.sim.tStop >= self.max_simulation_time or self.CONVERGENCE_FAILURE or self.RUNTIME_ERROR:
                 self.done = True
-                if not self.CONVERGENCE_FAILURE:
-                    print('Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.sim.name,self.sim.tStart, self.steps))
-                else:
-                    print("Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStart))
+                
+                if self.sim.tStop >= self.max_simulation_time:
+                    print('Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.sim.name,self.sim.tStop, self.steps))
+                elif self.CONVERGENCE_FAILURE:
+                    print("Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStop))
+                elif self.RUNTIME_ERROR:
+                    print("Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStop))
         
         return np.array(self.state), self.reward, self.done, {}
 
     def action_calc(self,action):
         """Calculate action"""
+        
+        assert action in self.action_space,'The action "{}" is not available in the environment action space!'.format(action)
         
         if action == 0:
             _Qref = - 0.1e3  #VAR
@@ -146,22 +159,19 @@ class PVDER(gym.Env):
         elif action == 2:
             _Qref = 0.0
             _Vdcref = 0.0 #Volts (DC)
-        else:
-            print('{} is an invalid action'.format(action))
             
-        if 'voltage_regulation' in self.goal_list:
+        if 'voltage_regulation' or 'Q_control' in self.goal_list:
             self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
                 
-        elif 'power_regulation' in self.goal_list:
+        elif 'power_regulation' or 'Vdc_control' in self.goal_list:
             self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
         
-        elif 'Q_control' not in self.goal_list and 'Vdc_control' not in self.goal_list:   #Do nothing
+        else:   #Do nothing
             print('No goals were given to agent, so no control action is being taken.')
-            pass
-    
     
     def reward_calc(self):
         """Calculate reward"""
+        
         _Qtarget = self.sim.PV_model.Q_ref
         _Vdctarget = self.sim.PV_model.Vdc_ref
         _Ptarget = self.reward_spec['reference_values']['P_ref']
@@ -221,9 +231,11 @@ class PVDER(gym.Env):
         
         self.done = False
         self.CONVERGENCE_FAILURE = False
+        self.RUNTIME_ERROR = False
     
     def reset(self):
-        #self.state = 0
+        """Reset environment."""
+        
         print('----Resetting environment and creating new PV-DER simulation----')
         print('Max environment steps:',self.spec.max_episode_steps)
         
