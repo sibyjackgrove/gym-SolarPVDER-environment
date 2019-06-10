@@ -45,15 +45,16 @@ class PVDER(gym.Env,Logging):
     #objective_dict = {'Q_ref_+':{'Q_ref':0.1},'Q_ref_-':{'Q_ref':-0.1}}
     env_model_spec = {'SinglePhase':True}
     
-    env_events_spec = {'insolation':{'t_events_start':1.0,'t_events_stop':10.0,'t_events_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
-                       'voltage':{'t_events_start':1.0,'t_events_stop':10.0,'t_events_step':1.0,'min':0.98,'max':1.02,'ENABLE':True}} 
+    env_events_spec = {'insolation':{'t_events_start':1.0,'t_events_stop':25.0,'t_events_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
+                       'voltage':{'t_events_start':1.0,'t_events_stop':25.0,'t_events_step':1.0,'min':0.98,'max':1.02,'ENABLE':True}} 
     
     env_sim_spec = {'sim_time_step':(1/60),'sim_time_per_env_step': (1/60)*30,'min_sim_time':1.0}    
     
     env_reward_spec={'goals_list':['voltage_regulation'],
                      'valid_goals_list':['voltage_regulation','power_regulation','Q_control','Vdc_control'],
                      'reference_values':{'P_ref':0.95},
-                     'DISCRETE_REWARD'=True} #List with agent goals. #,
+                     'DISCRETE_REWARD':True
+                    } #List with agent goals. 
     
     def __init__(self, n_sim_time_steps_per_env_step = 30, max_sim_time=None,
                  DISCRETE_REWARD=None, goals_list=None,
@@ -64,16 +65,16 @@ class PVDER(gym.Env,Logging):
         Args:
            n_sim_time_steps_per_env_step (int): Scalar specifiying simulation time steps per environment step.           
            max_sim_time (float): Scalar specifiying maximum simulation time in seconds for simulation within the environment.
-           goal_list (list): List of strings specifying agent goals.
+           goals_list (list): List of strings specifying agent goals.
            verbosity (string): Specify logging levels - ('DEBUG','INFO').
         """
         
         self.name = 'DER_env_1'
+        
         self.env_sim_spec['sim_time_per_env_step'] = self.env_sim_spec['sim_time_step']*n_sim_time_steps_per_env_step
+        self.max_sim_time_user = max_sim_time
         
-        self.max_simulation_time_user = max_simulation_time
-        self.goal_list = goal_list
-        
+        self.goals_list = goals_list
         self.DISCRETE_REWARD = DISCRETE_REWARD
         
         self.initialize_environment_variables()
@@ -81,12 +82,16 @@ class PVDER(gym.Env,Logging):
         self.initialize_logger()
         self.verbosity = verbosity #Set logging level - {DEBUG,INFO,WARNING,ERROR}
     
+    def __del__(self):
+        # body of destructor
+        print("Destructor called - environment deleted!")
+    
     def step(self, action):
         
         if self.steps == 0:
             print('New episode started with tStart = {} s'.format(self.sim.tStart))
         
-        if self.done and self.sim.tStop >= self.max_simulation_time:
+        if self.done and self.sim.tStop >= self.max_sim_time:
             print('Simulation completed - Reset environment to start new simulation!')
         
         elif self.done and self.CONVERGENCE_FAILURE:
@@ -124,10 +129,10 @@ class PVDER(gym.Env,Logging):
                 self.reward = self.reward_calc()
                 self.sim.tStart = self.sim.tStop                
             
-            if self.sim.tStop >= self.max_simulation_time or self.CONVERGENCE_FAILURE or self.RUNTIME_ERROR:
+            if self.sim.tStop >= self.max_sim_time or self.CONVERGENCE_FAILURE or self.RUNTIME_ERROR:
                 self.done = True
                 
-                if self.sim.tStop >= self.max_simulation_time:
+                if self.sim.tStop >= self.max_sim_time:
                     print('Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.sim.name,self.sim.tStop, self.steps))
                 elif self.CONVERGENCE_FAILURE:
                     print("Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStop))
@@ -151,10 +156,10 @@ class PVDER(gym.Env,Logging):
             _Qref = 0.0
             _Vdcref = 0.0 #Volts (DC)
             
-        if 'voltage_regulation' or 'Q_control' in self.goal_list:
+        if 'voltage_regulation' or 'Q_control' in self.goals_list:
             self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
                 
-        elif 'power_regulation' or 'Vdc_control' in self.goal_list:
+        elif 'power_regulation' or 'Vdc_control' in self.goals_list:
             self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
         
         else:   #Do nothing
@@ -165,10 +170,10 @@ class PVDER(gym.Env,Logging):
         
         _Qtarget = self.sim.PV_model.Q_ref
         _Vdctarget = self.sim.PV_model.Vdc_ref
-        _Ptarget = self.reward_spec['reference_values']['P_ref']
+        _Ptarget = self.env_reward_spec['reference_values']['P_ref']
         _reward = []
         
-        if 'Vdc_control' in self.goal_list:
+        if 'Vdc_control' in self.goals_list:
             if self.DISCRETE_REWARD:
                 
                 if abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget <= 0.02:
@@ -180,7 +185,7 @@ class PVDER(gym.Env,Logging):
             else:
                 _reward.append(-(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2)
                 
-        if 'Q_control' in self.goal_list:
+        if 'Q_control' in self.goals_list:
             if self.DISCRETE_REWARD:
                 
                 if abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) <= 0.01:
@@ -192,7 +197,7 @@ class PVDER(gym.Env,Logging):
             else:
                 _reward.append(-(self.sim.PV_model.S_PCC.imag - _Qtarget)**2)
         
-        if 'voltage_regulation' in self.goal_list:
+        if 'voltage_regulation' in self.goals_list:
             if self.DISCRETE_REWARD:
                 
                 if abs(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)/abs(self.sim.PV_model.Vrms_ref) <= 0.01:
@@ -204,7 +209,7 @@ class PVDER(gym.Env,Logging):
             else:
                 _reward.append(-(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)**2)
         
-        if 'power_regulation' in self.goal_list:
+        if 'power_regulation' in self.goals_list:
             if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget <= 0.01:
                 _reward.append(1)
             if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget >= 0.03:
@@ -245,6 +250,7 @@ class PVDER(gym.Env,Logging):
         return np.array(self.state)
     
     def render(self, mode='vector'):
+        """Show observations from environment."""
         
         _observations = {'ma':np.array(self.sim.PV_model.ma),
                          'ia':np.array(self.sim.PV_model.ia*self.sim.Ibase),                  
@@ -274,7 +280,7 @@ class PVDER(gym.Env,Logging):
     def setup_PVDER_simulation(self):
         """Setup simulation environment."""
         
-        self.max_simulation_time = self.max_simulation_time_user
+        self.max_sim_time = self.max_sim_time_user
         
         events = SimulationEvents(events_spec = self.env_events_spec,verbosity ='INFO')
         grid_model = Grid(events=events)
@@ -332,38 +338,38 @@ class PVDER(gym.Env,Logging):
                   self.sim.PV_model.S_PCC.real,self.sim.PV_model.S_PCC.imag,
                   self.sim.PV_model.Vdc,self.sim.PV_model.Ppv,
                   self.sim.PV_model.Vdc_ref,self.sim.PV_model.Q_ref,
-                  self.sim.tStart/self.max_simulation_time)        
+                  self.sim.tStart/self.max_sim_time)        
     
         return _state
     
     @property
-    def max_simulation_time(self):
-        return self.__max_simulation_time
+    def max_sim_time(self):
+        return self.__max_sim_time
     
     @property
-    def goal_list(self):
-        return self.__goal_list
+    def goals_list(self):
+        return self.__goals_list
     
     @property
     def DISCRETE_REWARD(self):
         return self.__DISCRETE_REWARD
     
     ## the attribute name and the method name must be same which is used to set the value for the attribute
-    @max_simulation_time.setter
-    def max_simulation_time(self,max_simulation_time):
+    @max_sim_time.setter
+    def max_sim_time(self,max_sim_time):
         
-        if max_simulation_time is None:
-            self.__max_simulation_time = self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']
-        elif isinstance(max_simulation_time, (int, float)):
-            if max_simulation_time < 1:
-                self.__max_simulation_time = self.env_sim_spec['min_sim_time']
-            elif max_simulation_time > self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']: #self._max_episode_steps
-                self.logger.warning('User specifed maximum simulation time is {} s, but allowable simulation time is only {} s!'.format(max_simulation_time,self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']))
-                self.__max_simulation_time = self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step'] #self.max_episode_steps*
+        if max_sim_time is None:
+            self.__max_sim_time = self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']
+        elif isinstance(max_sim_time, (int, float)):
+            if max_sim_time < self.env_sim_spec['min_sim_time']:
+                self.__max_sim_time = self.env_sim_spec['min_sim_time']
+            elif max_sim_time > self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']: #self._max_episode_steps
+                self.logger.warning('User specifed maximum simulation time is {} s, but allowable simulation time is only {} s!'.format(max_sim_time,self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']))
+                self.__max_sim_time = self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step'] #self.max_episode_steps*
             else:
-                self.__max_simulation_time = max_simulation_time
+                self.__max_sim_time = max_sim_time
         else:
-            raise ValueError("max_simulation_time must be a float!")
+            raise ValueError("max_sim_time must be a float!")
             
     @goals_list.setter
     def goals_list(self,goals_list):
