@@ -31,6 +31,8 @@ from pvder import utility_functions
 
 
 class PVDER(gym.Env,Logging):
+    
+    count = 0
     metadata = {'render.modes': ['vector','human']}
     
     observed_quantities = ['iaR','iaI',
@@ -43,20 +45,24 @@ class PVDER(gym.Env,Logging):
     observation_space = spaces.Box(low=-10, high=10, shape=(len(observed_quantities),),dtype=np.float32)
     
     #objective_dict = {'Q_ref_+':{'Q_ref':0.1},'Q_ref_-':{'Q_ref':-0.1}}
-    env_model_spec = {'SinglePhase':True}
+    env_model_spec = {'SinglePhase':True,'verbosity':'WARNING'}
     
-    env_events_spec = {'insolation':{'t_events_start':1.0,'t_events_stop':25.0,'t_events_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
-                       'voltage':{'t_events_start':1.0,'t_events_stop':25.0,'t_events_step':1.0,'min':0.98,'max':1.02,'ENABLE':True}} 
+    env_events_spec = {'insolation':{'t_events_start':1.0,'t_events_stop':39.0,'t_events_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
+                       'voltage':{'t_events_start':1.0,'t_events_stop':39.0,'t_events_step':1.0,'min':0.98,'max':1.02,'ENABLE':True}} 
     
-    env_sim_spec = {'sim_time_step':(1/60),'sim_time_per_env_step': (1/60)*30,'min_sim_time':1.0}    
+    env_sim_spec = {'sim_time_step':(1/60),
+                    'n_sim_time_steps_per_env_step':{'default':60,'min':1},
+                    'min_sim_time':1.0}    
     
     env_reward_spec={'goals_list':['voltage_regulation'],
                      'valid_goals_list':['voltage_regulation','power_regulation','Q_control','Vdc_control'],
-                     'reference_values':{'P_ref':0.95},
+                     'reference_values':{'P_ref':0.95,'Q_ref':0.1},
                      'DISCRETE_REWARD':True
                     } #List with agent goals. 
     
-    def __init__(self, n_sim_time_steps_per_env_step = 30, max_sim_time=None,
+    sim_time_per_env_step = env_sim_spec['sim_time_step']* env_sim_spec['n_sim_time_steps_per_env_step']['default']
+    
+    def __init__(self, n_sim_time_steps_per_env_step=None, max_sim_time=None,
                  DISCRETE_REWARD=None, goals_list=None,
                  verbosity='INFO'):   
         """
@@ -66,12 +72,15 @@ class PVDER(gym.Env,Logging):
            n_sim_time_steps_per_env_step (int): Scalar specifiying simulation time steps per environment step.           
            max_sim_time (float): Scalar specifiying maximum simulation time in seconds for simulation within the environment.
            goals_list (list): List of strings specifying agent goals.
-           verbosity (string): Specify logging levels - ('DEBUG','INFO').
+           verbosity (string): Specify logging levels - ('DEBUG','INFO','WARNING').
         """
         
-        self.name = 'DER_env_1'
+        #Increment count to keep track of number of gym-PVDER environment instances
+        PVDER.count = PVDER.count+1
+        self.name = 'GymDER_'+ str(self.count)
         
-        self.env_sim_spec['sim_time_per_env_step'] = self.env_sim_spec['sim_time_step']*n_sim_time_steps_per_env_step
+        #self.env_sim_spec['sim_time_per_env_step'] = self.env_sim_spec['sim_time_step']*n_sim_time_steps_per_env_step
+        self.n_sim_time_steps_per_env_step = n_sim_time_steps_per_env_step
         self.max_sim_time_user = max_sim_time
         
         self.goals_list = goals_list
@@ -84,34 +93,34 @@ class PVDER(gym.Env,Logging):
     
     def __del__(self):
         # body of destructor
-        print("Destructor called - environment deleted!")
+        print("Destructor called - {} deleted!".format(self.name))
     
     def step(self, action):
         
         if self.steps == 0:
-            print('New episode started with tStart = {} s'.format(self.sim.tStart))
+            self.logger.info('{}:New episode started with tStart = {} s'.format(self.name,self.sim.tStart))
         
         if self.done and self.sim.tStop >= self.max_sim_time:
-            print('Simulation completed - Reset environment to start new simulation!')
+            self.logger.warning('{}:Simulation completed - Reset environment to start new simulation!'.format(self.name))
         
         elif self.done and self.CONVERGENCE_FAILURE:
-            print('Simulation stopped due to converge failure at {} s - Reset environment to start new simulation!'.format(self.sim.tStop))
+            self.logger.warning('{}:Simulation stopped due to converge failure at {} s - Reset environment to start new simulation!'.format(self.name,self.sim.tStop))
         
         elif self.done and self.RUNTIME_ERROR:
-            print('Simulation stopped due to run time error failure at {} s - Check code for error in logic!'.format(self.sim.tStop))
+            self.logger.warning('{}:Simulation stopped due to run time error failure at {} s - Check code for error in logic!'.format(self.name,self.sim.tStop))
         
         elif not self.done:
-            self.sim.tStop = self.sim.tStart + self.env_sim_spec['sim_time_per_env_step'] #
+            self.sim.tStop = self.sim.tStart + self.sim_time_per_env_step #+ self.sim.tInc #
             self.steps = self.steps +1
-            #t = [self.sim.tStart,self.sim.tStop]
-            t = self.sim.t_calc()
+            #t = self.sim.t_calc()
+            t,dt = np.linspace(self.sim.tStart, self.sim.tStop,self.n_sim_time_steps_per_env_step+1,retstep=True)
+            #print(t,dt)
+            assert round(dt,6) == round(self.sim.tInc,6), 'Generated step size should be equal to specified step size.'            
 
             self.action_calc(action)
             try:
                 solution,info,ConvergeFlag = self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,t)
-                
-                #self.sim.run_simulation()
-                
+                                
             except ValueError:
                 if not ConvergeFlag:
                     self.CONVERGENCE_FAILURE = True
@@ -124,7 +133,7 @@ class PVDER(gym.Env,Logging):
                 assert ConvergeFlag,'Convergence flag should be true to calculate reward!'
                 
                 if self.sim.COLLECT_SOLUTION:
-                    self.sim.collect_solution(solution,t)
+                    self.sim.collect_solution(solution,t)                    
                     
                 self.reward = self.reward_calc()
                 self.sim.tStart = self.sim.tStop                
@@ -133,11 +142,11 @@ class PVDER(gym.Env,Logging):
                 self.done = True
                 
                 if self.sim.tStop >= self.max_sim_time:
-                    print('Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.sim.name,self.sim.tStop, self.steps))
+                    self.logger.info('{}:Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.name,self.sim.name,self.sim.tStop, self.steps))
                 elif self.CONVERGENCE_FAILURE:
-                    print("Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStop))
+                    self.logger.warning("{}:Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop))
                 elif self.RUNTIME_ERROR:
-                    print("Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.sim.name,self.sim.tStop))             
+                    elf.logger.warning("{}:Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop))             
         
         return np.array(self.state), self.reward, self.done, {}
 
@@ -168,9 +177,15 @@ class PVDER(gym.Env,Logging):
     def reward_calc(self):
         """Calculate reward"""
         
-        _Qtarget = self.sim.PV_model.Q_ref
-        _Vdctarget = self.sim.PV_model.Vdc_ref
-        _Ptarget = self.env_reward_spec['reference_values']['P_ref']
+        if 'voltage_regulation' in self.goals_list:
+            _Qtarget = self.sim.PV_model.Q_ref
+        elif 'Q_control' in self.goals_list:
+            _Qtarget = self.env_reward_spec['reference_values']['Q_ref']
+        
+        if 'power_regulation' or 'Vdc_control' in self.goals_list:
+            _Vdctarget = self.sim.PV_model.Vdc_ref
+            _Ptarget = self.env_reward_spec['reference_values']['P_ref']
+        
         _reward = []
         
         if 'Vdc_control' in self.goals_list:
@@ -232,21 +247,21 @@ class PVDER(gym.Env,Logging):
     def reset(self):
         """Reset environment."""
         
-        self.logger.debug('----Resetting environment and creating new PV-DER simulation----')
-        self.logger.debug('Max environment steps:',self.spec.max_episode_steps)
+        self.logger.debug('{}:Resetting environment and creating new PV-DER simulation'.format(self.name))
+        self.logger.debug('{}:Max environment steps:{}'.format(self.name,self.spec.max_episode_steps))
         
         #if self.sim in locals(): #Check if simulation object exists
         if hasattr(self, 'sim'):
-            self.logger.debug('The existing simulation object {} will be removed from environment.'.format(self.sim.name))
+            self.logger.debug('{}:The existing simulation object {} will be removed from environment.'.format(self.name,self.sim.name))
             self.cleanup_PVDER_simulation()
             
         else:
-            self.logger.debug('No simulation object exists in environment!')
+            self.logger.debug('{}:No simulation object exists in environment!'.format(self.name))
         
         self.initialize_environment_variables()
         self.setup_PVDER_simulation()
 
-        self.logger.info('Environment was reset and {} attached'.format(self.sim.name))
+        self.logger.info('{}:Environment was reset and {} attached'.format(self.name,self.sim.name))
         return np.array(self.state)
     
     def render(self, mode='vector'):
@@ -289,12 +304,12 @@ class PVDER(gym.Env,Logging):
             PVDER_model = SolarPV_DER_SinglePhase(grid_model = grid_model,events=events,
                                                  Sinverter_rated = 10.0e3,
                                                  standAlone = True,STEADY_STATE_INITIALIZATION=True,
-                                                 verbosity ='INFO')
+                                                 verbosity = self.env_model_spec['verbosity'])
         else:
             PVDER_model = SolarPV_DER_ThreePhase(grid_model = grid_model,events=events,
                                                  Sinverter_rated = 50.0e3,
                                                  standAlone = True,STEADY_STATE_INITIALIZATION=True,
-                                                 verbosity ='INFO')                                
+                                                 verbosity = self.env_model_spec['verbosity'])                                
 
         PVDER_model.LVRT_ENABLE = False  #Disconnects PV-DER using ride through settings during voltage anomaly
         PVDER_model.DO_EXTRA_CALCULATIONS = True
@@ -354,18 +369,22 @@ class PVDER(gym.Env,Logging):
     def DISCRETE_REWARD(self):
         return self.__DISCRETE_REWARD
     
+    @property
+    def n_sim_time_steps_per_env_step(self):
+        return self.__n_sim_time_steps_per_env_step
+    
     ## the attribute name and the method name must be same which is used to set the value for the attribute
     @max_sim_time.setter
     def max_sim_time(self,max_sim_time):
         
         if max_sim_time is None:
-            self.__max_sim_time = self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']
+            self.__max_sim_time = self.spec.max_episode_steps*self.sim_time_per_env_step
         elif isinstance(max_sim_time, (int, float)):
             if max_sim_time < self.env_sim_spec['min_sim_time']:
                 self.__max_sim_time = self.env_sim_spec['min_sim_time']
-            elif max_sim_time > self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']: #self._max_episode_steps
-                self.logger.warning('User specifed maximum simulation time is {} s, but allowable simulation time is only {} s!'.format(max_sim_time,self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step']))
-                self.__max_sim_time = self.spec.max_episode_steps*self.env_sim_spec['sim_time_per_env_step'] #self.max_episode_steps*
+            elif max_sim_time > self.spec.max_episode_steps*self.sim_time_per_env_step: #self._max_episode_steps
+                self.logger.warning('User specifed maximum simulation time is {} s, but allowable simulation time is only {} s!'.format(max_sim_time,self.spec.max_episode_steps*self.sim_time_per_env_step))
+                self.__max_sim_time = self.spec.max_episode_steps*self.sim_time_per_env_step #self.max_episode_steps*
             else:
                 self.__max_sim_time = max_sim_time
         else:
@@ -394,3 +413,21 @@ class PVDER(gym.Env,Logging):
             raise ValueError("DISCRETE_REWARD must be a boolean!")
                     
         return self.__DISCRETE_REWARD
+
+    @n_sim_time_steps_per_env_step.setter
+    def n_sim_time_steps_per_env_step(self,n_sim_time_steps_per_env_step):
+        
+        if n_sim_time_steps_per_env_step is None:
+            self.__n_sim_time_steps_per_env_step =  self.env_sim_spec['n_sim_time_steps_per_env_step']['default'] 
+        elif isinstance(n_sim_time_steps_per_env_step, int):
+            if n_sim_time_steps_per_env_step >= self.env_sim_spec['n_sim_time_steps_per_env_step']['min']:
+                self.__n_sim_time_steps_per_env_step = n_sim_time_steps_per_env_step
+            else:
+                self.__n_sim_time_steps_per_env_step = self.env_sim_spec['n_sim_time_steps_per_env_step']['min']
+                self.logger.warning('n_sim_time_steps_per_env_step should be greater than {}!'.format(self.env_sim_spec['n_sim_time_steps_per_env_step']['min']))
+        else:
+            raise ValueError("n_sim_time_steps_per_env_step must be an integer!")
+        
+        self.sim_time_per_env_step = self.env_sim_spec['sim_time_step']*self.n_sim_time_steps_per_env_step
+        
+        return self.__n_sim_time_steps_per_env_step

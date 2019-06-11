@@ -51,3 +51,58 @@ def test_random_rollout():
             (ob, _reward, done, _info) = env.step(a)
             if done: break
         env.close()
+
+# Test if environment is giving discrete reward
+def test_discrete_reward():
+    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=True,goals_list=['voltage_regulation','Q_control'])]:
+        agent = lambda ob: env.action_space.sample()
+        ob = env.reset()
+        for _ in range(10):
+            assert env.observation_space.contains(ob)
+            a = agent(ob)
+            assert env.action_space.contains(a)
+            (ob, _reward, done, _info) = env.step(a)
+            assert isinstance(_reward,int),'Reward should be discrete if DISCRETE_REWARD is True'
+            if done: break
+        env.close()
+
+# Test if environment is giving continuous reward
+def test_continuous_reward():
+    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=False,goals_list=['voltage_regulation','Q_control'])]:
+        agent = lambda ob: env.action_space.sample()
+        ob = env.reset()
+        for _ in range(10):
+            assert env.observation_space.contains(ob)
+            a = agent(ob)
+            assert env.action_space.contains(a)
+            (ob, _reward, done, _info) = env.step(a)
+            assert isinstance(_reward,float),'Reward should be discrete if DISCRETE_REWARD is True'
+            if done: break
+        env.close()
+        
+# Test if arguments are working
+def test_time_steps():
+    
+    _max_sim_time = 25.0
+    _n_sim_time_steps_per_env_step = 10
+    
+    for env in [gym.make('PVDER-v0',n_sim_time_steps_per_env_step =_n_sim_time_steps_per_env_step,max_sim_time =_max_sim_time)]:
+        agent = lambda ob: env.action_space.sample()
+        ob = env.reset()
+        
+        assert env.n_sim_time_steps_per_env_step == _n_sim_time_steps_per_env_step, 'Environment n_sim_time_steps_per_env_step is different from the value specifed by user!'
+        assert env.max_sim_time == _max_sim_time, 'Environment max_sim_time is different from value specified by user!'
+        
+        done = False
+        steps = 0 
+        while not done:
+            assert env.observation_space.contains(ob)
+            a = agent(ob)
+            assert env.action_space.contains(a)
+            (ob, _reward, done, _info) = env.step(a)
+            steps = steps + 1
+            
+        assert round(env.steps*env.n_sim_time_steps_per_env_step*env.sim.tInc,6) == round(env.max_sim_time,6), 'Error in steps check!'
+        assert round(ob[-1]*env.max_sim_time,6) == round(env.max_sim_time,6), 'Last time instant should be equal to user specified max_sim_time!'
+            
+        env.close()
