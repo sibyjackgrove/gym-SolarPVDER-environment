@@ -54,9 +54,9 @@ class PVDER(gym.Env,Logging):
                     'n_sim_time_steps_per_env_step':{'default':60,'min':1},
                     'min_sim_time':1.0}    
     
-    env_reward_spec={'goals_list':['voltage_regulation'],
-                     'valid_goals_list':['voltage_regulation','power_regulation','Q_control','Vdc_control'],
-                     'reference_values':{'P_ref':0.95,'Q_ref':0.1},
+    env_reward_spec={'goals_list':{'default':['voltage_regulation'],
+                                   'valid': ['voltage_regulation','power_regulation','Q_control','Vdc_control']},
+                     'reference_values':{'P_ref':0.95,'Q_ref':0.01},
                      'DISCRETE_REWARD':True
                     } #List with agent goals. 
     
@@ -90,6 +90,8 @@ class PVDER(gym.Env,Logging):
         
         self.initialize_logger()
         self.verbosity = verbosity #Set logging level - {DEBUG,INFO,WARNING,ERROR}
+        
+        print('{}:Environment created!'.format(self.name))
     
     def __del__(self):
         # body of destructor
@@ -179,7 +181,7 @@ class PVDER(gym.Env,Logging):
         
         if 'voltage_regulation' in self.goals_list:
             _Qtarget = self.sim.PV_model.Q_ref
-        elif 'Q_control' in self.goals_list:
+        elif 'Q_control' in self.goals_list and 'voltage_regulation' not in self.goals_list:
             _Qtarget = self.env_reward_spec['reference_values']['Q_ref']
         
         if 'power_regulation' or 'Vdc_control' in self.goals_list:
@@ -202,7 +204,8 @@ class PVDER(gym.Env,Logging):
                 
         if 'Q_control' in self.goals_list:
             if self.DISCRETE_REWARD:
-                
+                if _Qtarget == 0.0:
+                    _Qtarget = 1e-6
                 if abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) <= 0.01:
                     _reward.append(1)
                 elif abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) >= 0.05:
@@ -225,9 +228,9 @@ class PVDER(gym.Env,Logging):
                 _reward.append(-(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)**2)
         
         if 'power_regulation' in self.goals_list:
-            if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget <= 0.01:
+            if abs(self.sim.PV_model.S_PCC.real - _Ptarget)/_Ptarget <= 0.01:
                 _reward.append(1)
-            if abs(self.sim.PV_model.Ppv - _Ppvtarget)/_Ppvtarget >= 0.03:
+            if abs(self.sim.PV_model.S_PCC.real - _Ptarget)/_Ptarget >= 0.03:
                 _reward.append(-5)
             else:
                 _reward.append(-1)       
@@ -334,10 +337,41 @@ class PVDER(gym.Env,Logging):
     def generate_simulation_events(self):
         """Create random events."""
         
-        self.sim.simulation_events.create_random_events(self.env_events_spec['insolation']['t_events_start'],
-                                                        self.env_events_spec['insolation']['t_events_stop'],
-                                                        self.env_events_spec['insolation']['t_events_step'],
-                                                        events_type=['insolation','voltage'])
+        events_type_list =[]
+        for event_type in self.env_events_spec:
+            if self.env_events_spec[event_type]['ENABLE']:
+                events_type_list.append(event_type)
+                
+        self.sim.simulation_events.create_random_events(self.env_events_spec['voltage']['t_events_start'],
+                                                        self.env_events_spec['voltage']['t_events_stop'],
+                                                        self.env_events_spec['voltage']['t_events_step'],
+                                                        events_type=events_type_list)    
+    
+    def update_env_events(self,event_spec_list):
+        """Update environment simulation event."""
+        
+        assert isinstance(event_spec_list,list), 'event_spec_list should be a list!'
+        
+        for event_spec in event_spec_list:
+            assert isinstance(event_spec,dict), 'Event spec should be a dictionary!'
+            assert len(event_spec.keys()) == 1, 'Only one event type should be specified at at time!'
+            
+            event_type = list(event_spec)[0] 
+            event_parameter_type_list = event_spec[event_type].keys()           
+        
+            if event_type in self.env_events_spec.keys():
+                for event_parameter_type in event_parameter_type_list:
+                    if event_parameter_type in self.env_events_spec[event_type].keys():
+                        self.env_events_spec[event_type][event_parameter_type] = event_spec[event_type][event_parameter_type]
+                    else:
+                        raise ValueError('{} is not a valid paramter for {} event!'.format(event_parameter_type,event_type))
+            else:
+                raise ValueError('{} is not a valid event!'.format(event_type))
+        
+        if hasattr(self, 'sim'):
+            self.logger.warning('{}:Updating events spec in attached simulation object {}.'.format(self.name,self.sim.name))
+            self.sim.simulation_events.update_events_spec(events_spec = self.env_events_spec)
+            self.generate_simulation_events()
     
     def cleanup_PVDER_simulation(self):
         """Remove previous instances."""
@@ -394,13 +428,13 @@ class PVDER(gym.Env,Logging):
     def goals_list(self,goals_list):
         
         if goals_list is None:
-            self.__goals_list =  self.env_reward_spec['goals_list'] 
-        elif set(goals_list).issubset(self.env_reward_spec['valid_goals_list']):
+            self.__goals_list =  self.env_reward_spec['goals_list']['default'] 
+        elif set(goals_list).issubset(self.env_reward_spec['goals_list']['valid']):
             self.__goals_list = goals_list       
         else:
-             raise ValueError('Goal list:{} contains invalid elements, available elements are:{}'.format(goals_list,self.reward_spec['goals_list']))
+             raise ValueError('Goal list:{} contains invalid elements, available elements are:{}'.format(goals_list,self.env_reward_spec['goals_list']['valid']))
                     
-        return self.__goals_list
+        return self.__goals_list    
     
     @DISCRETE_REWARD.setter
     def DISCRETE_REWARD(self,DISCRETE_REWARD):

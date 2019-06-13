@@ -106,3 +106,24 @@ def test_time_steps():
         assert round(ob[-1]*env.max_sim_time,6) == round(env.max_sim_time,6), 'Last time instant should be equal to user specified max_sim_time!'
             
         env.close()
+
+# Test if environment events can be updated
+def test_update_env_events():
+    
+    new_spec ={'voltage': {'min':0.95}}
+        
+    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=True,goals_list=['voltage_regulation','Q_control'])]:
+        env.update_env_events(event_spec_list=[new_spec])
+        agent = lambda ob: env.action_space.sample()
+        ob = env.reset()
+        
+        assert env.env_events_spec['voltage']['min'] == new_spec['voltage']['min'], 'Environment events spec has not been modified!'
+        assert env.sim.simulation_events._events_spec['voltage']['min'] == new_spec['voltage']['min'], 'Simulation object events spec has not been modified!'
+        
+        for _ in range(10):
+            assert env.observation_space.contains(ob)
+            a = agent(ob)
+            assert env.action_space.contains(a)
+            (ob, _reward, done, _info) = env.step(a)
+            if done: break
+        env.close()
