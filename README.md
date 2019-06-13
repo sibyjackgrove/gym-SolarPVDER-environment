@@ -1,6 +1,8 @@
 **Status:** Maintenance (expect bug fixes and minor updates)
 # Gym environment for PV-DER
 
+[![CodeFactor](https://www.codefactor.io/repository/github/sibyjackgrove/gym-solarpvder-environment/badge/master)](https://www.codefactor.io/repository/github/sibyjackgrove/gym-solarpvder-environment/overview/master)
+
 Solar photovoltaic distributed energy resources (PV-DER) are power electronic inverter based generation (IBG) connected to the electric power distribution system (eg. roof top solar PV systems). This environment consists of a single DER connected to a stiff voltage source as shown in the following schematic:
 
 ![schematic of PV-DER](PVDER_schematic.png)
