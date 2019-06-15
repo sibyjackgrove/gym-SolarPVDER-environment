@@ -45,7 +45,9 @@ class PVDER(gym.Env,Logging):
     observation_space = spaces.Box(low=-10, high=10, shape=(len(observed_quantities),),dtype=np.float32)
     
     #objective_dict = {'Q_ref_+':{'Q_ref':0.1},'Q_ref_-':{'Q_ref':-0.1}}
-    env_model_spec = {'SinglePhase':True,'verbosity':'WARNING'}
+    env_model_spec = {'model_1':{'SinglePhase':True,'S_rated':10.0e3},
+                      'model_2':{'SinglePhase':False,'S_rated':50.0e3},
+                      'verbosity':'WARNING'}
     
     env_events_spec = {'insolation':{'t_events_start':1.0,'t_events_stop':39.0,'t_events_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
                        'voltage':{'t_events_start':1.0,'t_events_stop':39.0,'t_events_step':1.0,'min':0.98,'max':1.02,'ENABLE':True}} 
@@ -56,7 +58,7 @@ class PVDER(gym.Env,Logging):
     
     env_reward_spec={'goals_list':{'default':['voltage_regulation'],
                                    'valid': ['voltage_regulation','power_regulation','Q_control','Vdc_control']},
-                     'reference_values':{'P_ref':0.95,'Q_ref':0.01},
+                     'reference_values':{'P_ref':8.4e3,'Q_ref':1.0e3},
                      'DISCRETE_REWARD':True
                     } #List with agent goals. 
     
@@ -166,12 +168,12 @@ class PVDER(gym.Env,Logging):
         elif action == 2:
             _Qref = 0.0
             _Vdcref = 0.0 #Volts (DC)
-            
-        if 'voltage_regulation' or 'Q_control' in self.goals_list:
-            self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase
+           
+        if 'voltage_regulation' in self.goals_list or 'Q_control' in self.goals_list:
+            self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase           
                 
-        elif 'power_regulation' or 'Vdc_control' in self.goals_list:
-            self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase
+        elif 'power_regulation' in self.goals_list or 'Vdc_control' in self.goals_list:        
+            self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase            
         
         else:   #Do nothing
             print('No goals were given to agent, so no control action is being taken.')
@@ -182,11 +184,11 @@ class PVDER(gym.Env,Logging):
         if 'voltage_regulation' in self.goals_list:
             _Qtarget = self.sim.PV_model.Q_ref
         elif 'Q_control' in self.goals_list and 'voltage_regulation' not in self.goals_list:
-            _Qtarget = self.env_reward_spec['reference_values']['Q_ref']
+            _Qtarget = self.env_reward_spec['reference_values']['Q_ref']/self.sim.Sbase
         
-        if 'power_regulation' or 'Vdc_control' in self.goals_list:
+        if 'power_regulation' in self.goals_list or 'Vdc_control' in self.goals_list:
             _Vdctarget = self.sim.PV_model.Vdc_ref
-            _Ptarget = self.env_reward_spec['reference_values']['P_ref']
+            _Ptarget = self.env_reward_spec['reference_values']['P_ref']/self.sim.Sbase
         
         _reward = []
         
@@ -295,7 +297,7 @@ class PVDER(gym.Env,Logging):
             self.results.plot_DER_simulation(plot_type='voltage_LV')
             self.results.plot_DER_simulation(plot_type='current')
         
-    def setup_PVDER_simulation(self):
+    def setup_PVDER_simulation(self,model_type='model_1'):
         """Setup simulation environment."""
         
         self.max_sim_time = self.max_sim_time_user
@@ -303,14 +305,14 @@ class PVDER(gym.Env,Logging):
         events = SimulationEvents(events_spec = self.env_events_spec,verbosity ='INFO')
         grid_model = Grid(events=events)
         
-        if self.env_model_spec['SinglePhase']:
+        if self.env_model_spec[model_type]['SinglePhase']:
             PVDER_model = SolarPV_DER_SinglePhase(grid_model = grid_model,events=events,
-                                                 Sinverter_rated = 10.0e3,
+                                                 Sinverter_rated = self.env_model_spec[model_type]['S_rated'],
                                                  standAlone = True,STEADY_STATE_INITIALIZATION=True,
                                                  verbosity = self.env_model_spec['verbosity'])
         else:
             PVDER_model = SolarPV_DER_ThreePhase(grid_model = grid_model,events=events,
-                                                 Sinverter_rated = 50.0e3,
+                                                 Sinverter_rated = self.env_model_spec[model_type]['S_rated'],
                                                  standAlone = True,STEADY_STATE_INITIALIZATION=True,
                                                  verbosity = self.env_model_spec['verbosity'])                                
 
