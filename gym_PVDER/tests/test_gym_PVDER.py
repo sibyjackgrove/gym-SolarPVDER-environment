@@ -2,8 +2,8 @@ import pytest
 import numpy as np
 
 import gym
-import gym_DER
-from gym_DER.envs import PVDER_env
+import gym_PVDER
+from gym_PVDER.envs import PVDER_env
 
 #@pytest.mark.parametrize("spec", spec_list)
 
