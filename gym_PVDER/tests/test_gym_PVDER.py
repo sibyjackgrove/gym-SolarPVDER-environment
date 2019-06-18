@@ -2,8 +2,8 @@ import pytest
 import numpy as np
 
 import gym
-import gym_PVDER
-from gym_PVDER.envs import PVDER_env
+import gym_DER
+from gym_DER.envs import PVDER_env
 
 #@pytest.mark.parametrize("spec", spec_list)
 
@@ -22,7 +22,7 @@ def test_env():
 
     # Check that dtype is explicitly declared for gym.Box spaces
     for warning_msg in warnings:
-        assert not 'autodetected dtype' in str(warning_msg.message)
+        assert 'autodetected dtype' not in str(warning_msg.message)
 
     ob_space = env.observation_space
     act_space = env.action_space
@@ -49,12 +49,13 @@ def test_random_rollout():
             a = agent(ob)
             assert env.action_space.contains(a)
             (ob, _reward, done, _info) = env.step(a)
-            if done: break
+            if done:
+                break
         env.close()
 
 # Test if environment is giving discrete reward
 def test_discrete_reward():
-    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=True,goals_list=['voltage_regulation','Q_control'])]:
+    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=True,goals_list=['voltage_regulation'])]:
         agent = lambda ob: env.action_space.sample()
         ob = env.reset()
         for _ in range(10):
@@ -63,12 +64,13 @@ def test_discrete_reward():
             assert env.action_space.contains(a)
             (ob, _reward, done, _info) = env.step(a)
             assert isinstance(_reward,int),'Reward should be discrete if DISCRETE_REWARD is True'
-            if done: break
+            if done:
+                break
         env.close()
 
 # Test if environment is giving continuous reward
 def test_continuous_reward():
-    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=False,goals_list=['voltage_regulation','Q_control'])]:
+    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=False,goals_list=['voltage_regulation'])]:
         agent = lambda ob: env.action_space.sample()
         ob = env.reset()
         for _ in range(10):
@@ -76,8 +78,9 @@ def test_continuous_reward():
             a = agent(ob)
             assert env.action_space.contains(a)
             (ob, _reward, done, _info) = env.step(a)
-            assert isinstance(_reward,float),'Reward should be discrete if DISCRETE_REWARD is True'
-            if done: break
+            assert isinstance(_reward,float),'Reward should be float if DISCRETE_REWARD is False'
+            if done:
+                break
         env.close()
         
 # Test if arguments are working
@@ -112,7 +115,7 @@ def test_update_env_events():
     
     new_spec ={'voltage': {'min':0.95}}
         
-    for env in [gym.make('PVDER-v0',DISCRETE_REWARD=True,goals_list=['voltage_regulation','Q_control'])]:
+    for env in [gym.make('PVDER-v0')]:
         env.update_env_events(event_spec_list=[new_spec])
         agent = lambda ob: env.action_space.sample()
         ob = env.reset()
@@ -125,5 +128,6 @@ def test_update_env_events():
             a = agent(ob)
             assert env.action_space.contains(a)
             (ob, _reward, done, _info) = env.step(a)
-            if done: break
+            if done:
+                break
         env.close()
