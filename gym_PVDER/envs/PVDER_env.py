@@ -2,13 +2,17 @@ import gym
 from gym import error, spaces, utils
 from gym.utils import seeding
 
-import numpy as np
-import random
-
 import sys
 import os
 import logging
 import importlib.util
+import pprint
+import time
+
+import matplotlib.pyplot as plt
+
+import numpy as np
+import random
 
 # For illustrative purposes.
 package_name = 'pvder'
@@ -29,8 +33,9 @@ from pvder.utility_classes import Logging
 
 from pvder import utility_functions
 
+from gym_PVDER.envs.env_utilities import Utilities
 
-class PVDER(gym.Env,Logging):
+class PVDER(gym.Env,Logging,Utilities):
     
     count = 0
     metadata = {'render.modes': ['vector','human']}
@@ -58,7 +63,7 @@ class PVDER(gym.Env,Logging):
     
     env_reward_spec = {'reward_list':{'default':['voltage_error'],
                                       'valid': ['voltage_error','power_error','Q_error','Vdc_error']},
-                       'reference_values':{'P_ref':8.4e3,'Q_ref':1.0e3},
+                       'reference_values':{'P_ref':45.4e3,'Q_ref':5.5e3},
                        'DISCRETE_REWARD':True
                       } #List with agent goals. 
     
@@ -121,6 +126,7 @@ class PVDER(gym.Env,Logging):
         
         self.initialize_environment_variables()
         
+        
         print('{}:Environment created!'.format(self.name))
     
     def __del__(self):
@@ -129,7 +135,9 @@ class PVDER(gym.Env,Logging):
     
     def step(self, action):
         
-        if self.steps == 0:
+        time_start = time.time()
+        
+        if self._steps == 0:
             self.logger.info('{}:New episode started with tStart = {} s'.format(self.name,self.sim.tStart))
         
         if self.done and self.sim.tStop >= self.max_sim_time:
@@ -143,7 +151,7 @@ class PVDER(gym.Env,Logging):
         
         elif not self.done:
             self.sim.tStop = self.sim.tStart + self._sim_time_per_env_step #+ self.sim.tInc #
-            self.steps = self.steps +1
+            self._steps = self._steps + 1
             #t = self.sim.t_calc()
             t,dt = np.linspace(self.sim.tStart, self.sim.tStop,self.n_sim_time_steps_per_env_step+1,retstep=True)
             #print(t,dt)
@@ -157,10 +165,10 @@ class PVDER(gym.Env,Logging):
             except ValueError:
                 if not ConvergeFlag:
                     self.CONVERGENCE_FAILURE = True
-                    self.reward = -100.0 #Discourage convergence failures using large penalty
+                    self._reward = -100.0 #Discourage convergence failures using large penalty
                 else:
                     self.RUNTIME_ERROR = True  
-                    self.reward = 0.0 #Not a convergence failure
+                    self._reward = 0.0 #Not a convergence failure
             
             else:  #If solution converges calculate reward
                 assert ConvergeFlag,'Convergence flag should be true to calculate reward!'
@@ -168,25 +176,37 @@ class PVDER(gym.Env,Logging):
                 if self.sim.COLLECT_SOLUTION:
                     self.sim.collect_solution(solution,t)                    
                     
-                self.reward = self.reward_calc()
-                self.sim.tStart = self.sim.tStop                
+                self._reward = self.reward_calc()
+                self.sim.tStart = self.sim.tStop
+                self.update_reward_stats()
             
             if self.sim.tStop >= self.max_sim_time or self.CONVERGENCE_FAILURE or self.RUNTIME_ERROR:
                 self.done = True
                 
                 if self.sim.tStop >= self.max_sim_time:
-                    self.logger.info('{}:Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.name,self.sim.name,self.sim.tStop, self.steps))
+                    self.logger.info('{}:Simulation time limit exceeded in {} at tStop = {:.2f} s after completing {} steps - ending simulation!'.format(self.name,self.sim.name,self.sim.tStop, self._steps))
                 elif self.CONVERGENCE_FAILURE:
                     self.logger.warning("{}:Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop))
                 elif self.RUNTIME_ERROR:
-                    elf.logger.warning("{}:Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop))             
+                    elf.logger.warning("{}:Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop)) 
+                    
+            self._step_time = time.time() - time_start
+            self.update_time_stats()
         
-        return np.array(self.state), self.reward, self.done, {}
+        return np.array(self.state), self._reward, self.done, {}
 
     def action_calc(self,action):
         """Calculate action"""
         
         assert action in self.action_space,'The action "{}" is not available in the environment action space!'.format(action)
+        
+        if len(self.goals_list) == 0:   #Do nothing
+            print('No goals were given to agent, so no control action is being taken and action is reset to 0.')
+            action = 2
+        else:
+            goal_type = self.goals_list[0] #Only the first goal in goals list will be considered for now
+        
+        self.update_action_stats(action)
         
         if action == 0:
             _Qref = -self._delQref #- 0.1e3  #VAR
@@ -196,9 +216,7 @@ class PVDER(gym.Env,Logging):
             _Vdcref = self._delVdcref #0.1 #Volts (DC)
         elif action == 2:
             _Qref = 0.0
-            _Vdcref = 0.0 #Volts (DC)
-        
-        goal_type = self.goals_list[0] #Only the first goal in goals list will be considered for now
+            _Vdcref = 0.0 #Volts (DC)        
         
         #if 'voltage_regulation' in self.goals_list or 'Q_control' in self.goals_list:
         for action in self.env_goal_spec[goal_type]['action']['my_spec']:
@@ -208,9 +226,6 @@ class PVDER(gym.Env,Logging):
             if action == 'Vdc_control':
                 #elif 'power_regulation' in self.goals_list or 'Vdc_control' in self.goals_list:
                 self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase            
-
-        if len(self.goals_list) == 0:   #Do nothing
-            print('No goals were given to agent, so no control action is being taken.')
     
     def reward_calc(self):
         """Calculate reward"""
@@ -287,14 +302,15 @@ class PVDER(gym.Env,Logging):
     def initialize_environment_variables(self):
         """Initialize environment variables."""
         
-        self.steps  = 0
-        self.reward = 0
+        self._steps  = 0
+        self._reward = 0
         
         self.done = False
         self.CONVERGENCE_FAILURE = False
         self.RUNTIME_ERROR = False
         
         self.update_env_goal(goal_type=None,goal_spec=None)
+        self.initialize_stats()
     
     def reset(self):
         """Reset environment."""
@@ -334,7 +350,9 @@ class PVDER(gym.Env,Logging):
         
         for item in _observations:
                 print('{}:{:.2f},'.format(item,_observations[item]), end=" ")
-        print('\nReward:{:.4f}'.format(self.reward))
+        print('\nReward:{:.5f}'.format(self._reward))
+        
+        self.show_step_time()
        
         if mode == 'human':
             self.results.plot_DER_simulation(plot_type='active_power_Ppv_Pac_PCC')
@@ -400,6 +418,7 @@ class PVDER(gym.Env,Logging):
         """Update environment simulation event."""
         
         assert isinstance(event_spec_list,list), 'event_spec_list should be a list!'
+        print(isinstance(event_spec_list,list))
         
         for event_spec in event_spec_list:
             assert isinstance(event_spec,dict), 'Event spec should be a dictionary!'
@@ -440,10 +459,79 @@ class PVDER(gym.Env,Logging):
             assert goal_spec.keys() in self.env_goal_spec.keys(), '{} is not a valid goal!'.format(goal_spec.keys())
             print('Update function is under construction!')
     
+    
+    def calc_returns(self):
+        """Calculate returns."""
+        
+        _goals_list= list(self.env_goal_spec.keys())
+        _action_spec_list =['random','inc','dec','no_change']
+        _n_episodes = 2
+        
+        self.env_average_return = {}        
+       
+        for goal in _goals_list:
+            self.env_average_return[goal] = {}
+            self.goals_list = [goal]
+            self.show_env_config()
+            for action_spec in _action_spec_list:
+                self.env_average_return[goal][action_spec] = {}
+                total_return = 0.0
+                print('Calculating average return for "{}" goal with "{}" action.'.format(goal,action_spec)) 
+                for i in range(_n_episodes):
+                    episode_return = 0.0
+                    observation = self.reset()
+                    done = False
+                    while not done:
+                        if action_spec == 'random':
+                            action = self.action_space.sample()  #Sample actions from the environment's discrete action space
+                        elif action_spec == 'inc':
+                            action = 0
+                        elif action_spec == 'dec':
+                            action = 1
+                        elif action_spec == 'no_change':
+                            action = 2
+                    
+                        observation, reward, done, _ = self.step(action)
+                        episode_return += reward
+                    
+                    total_return += episode_return
+                self.env_average_return[goal][action_spec]['return'] =  total_return/_n_episodes
+                self.env_average_return[goal][action_spec]['ref'] =  [self.sim.PV_model.Vdc_ref*self.sim.Vbase,
+                                                                      self.sim.PV_model.Q_ref*self.sim.Sbase]
+                
+        self.show_env_returns()
+    
     def show_env_config(self):
+        """Show environment configuration."""
+        
+        print('Environment name:{}'.format(self.name))
+        self.show_goal_config()
+        self.show_sim_config()
+    
+    def show_sim_config(self):
         """Show actions."""
         
         print('time step:{:.4f},del Qref:{:.2f},del Vdcref:{:.2f}'.format(self._sim_time_per_env_step,self._delQref,self._delVdcref))
+        print('Voltage events:{},Insolation events:{}'.format(self.env_events_spec['voltage']['ENABLE'],self.env_events_spec['insolation']['ENABLE']))
+    
+    def show_goal_config(self):
+        """Show goal configuration."""
+        
+        goal_type = self.goals_list[0]
+        print('Goal type:',goal_type)
+        print('Reward type:{},Discrete:{}'.format(self.env_goal_spec[goal_type]['reward']['my_spec'],self.DISCRETE_REWARD))
+        
+        if goal_type == 'Q_regulation':
+            print('Q reference:{}'.format(self.env_reward_spec['reference_values']['Q_ref']))
+        elif goal_type == 'power_regulation':
+            print('P reference:{}'.format(self.env_reward_spec['reference_values']['P_ref']))
+                
+        print('Action type:',self.env_goal_spec[goal_type]['action']['my_spec'])
+
+    def show_env_returns(self):
+        """Show environment returns."""
+        
+        self.pp.pprint(self.env_average_return)             
     
     @property                         #Decorator used for auto updating
     def state(self):
@@ -497,7 +585,8 @@ class PVDER(gym.Env,Logging):
         if goals_list is None:
             self.__goals_list =  self.default_goals
         elif set(goals_list).issubset(self.env_goal_spec.keys()):
-            self.__goals_list = goals_list       
+            self.__goals_list = goals_list
+            self.logger.info('The goals list is updated, the goals are:{}'.format(self.goals_list))
         else:
              raise ValueError('Goal list:{} contains invalid elements, available elements are:{}'.format(goals_list,self.env_goal_spec.keys()))
                     
