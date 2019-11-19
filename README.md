@@ -1,4 +1,4 @@
-**Status:** Maintenance (expect bug fixes and minor updates)
+**Status:** Expect regular updates and bug fixes.
 # Gym environment for PV-DER
 
 [![CodeFactor](https://www.codefactor.io/repository/github/sibyjackgrove/gym-solarpvder-environment/badge/master)](https://www.codefactor.io/repository/github/sibyjackgrove/gym-solarpvder-environment/overview/master)
