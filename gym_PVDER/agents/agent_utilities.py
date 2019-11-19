@@ -2,30 +2,64 @@
 
 import matplotlib.pyplot as plt
 
+import numpy as np
+
 import tensorflow as tf
 from tensorflow.keras.callbacks import TensorBoard
 
 class Utilities():
     """Miscelleneous utilities."""
     
-    def collect_aggregate_rewards(self,episode,average_reward,min_reward,max_reward):
+    valid_stats = ['episodic_reward','average_reward','min_reward','max_reward']
+    
+    
+    def initialize_aggregate_rewards(self,reward_stats =  ['average_reward','min_reward','max_reward']):
+        """Initialize dictionary collecting rewards statistics."""
+        
+        self.aggregate_episode_rewards = {}
+        self.aggregate_episode_rewards.update({'episode': []})
+        
+        for stat_type in reward_stats:
+            if stat_type in self.valid_stats:
+                self.aggregate_episode_rewards.update({stat_type: []})            
+            else:
+                ValueError(f'{stat_type} is invalid!')        
+                
+        self._reward_stats = reward_stats
+    
+    def collect_aggregate_rewards(self, episode, **reward_stats): #episode,average_reward,min_reward,max_reward
         """Collect rewards statistics."""
         
         print('Storing rewards @ Episode:{},Steps:{}'.format(episode,self.env.steps))       
        
-        self.aggregate_episode_rewards['episode'].append(episode)
-        self.aggregate_episode_rewards['average'].append(average_reward)
-        self.aggregate_episode_rewards['min'].append(min_reward)
-        self.aggregate_episode_rewards['max'].append(max_reward)        
+        self.aggregate_episode_rewards['episode'].append(episode) 
         
-        print(f'Episode: {episode:>5d}, average reward: {average_reward:>4.1f}, current epsilon: {self.epsilon:.3f}')        
+        for stat_type,value in reward_stats.items():
+            if stat_type in self._reward_stats:
+                self.aggregate_episode_rewards[stat_type].append(value)
+                print(stat_type,':',value) 
+            else:
+                ValueError(f'{stat_type} is invalid!')
+            
+            #self.aggregate_episode_rewards['episode'].append(episode)
+            #self.aggregate_episode_rewards['average'].append(average_reward)
+            #self.aggregate_episode_rewards['min'].append(min_reward)
+            #self.aggregate_episode_rewards['max'].append(max_reward)        
+
+        #print(f'Episode: {episode:>5d}, average reward: {average_reward:>4.1f}, current epsilon: {self.epsilon:.3f}')        
     
     def show_plots(self):
         """Show plots."""
         
-        plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards['average'], label="average rewards")
-        plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards['max'], label="max rewards")
-        plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards['min'], label="min rewards")
+        for stat_type in self._reward_stats:
+            if stat_type in self.valid_stats:
+                plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards[stat_type], label=stat_type)
+            else:
+                ValueError(f'{stat_type} is invalid!') 
+        
+        #plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards['average'], label="average rewards")
+        #plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards['max'], label="max rewards")
+        #plt.plot(self.aggregate_episode_rewards['episode'], self.aggregate_episode_rewards['min'], label="min rewards")
         plt.legend(loc=4)
         plt.show()        
         
@@ -56,7 +90,8 @@ class ModifiedTensorBoard(TensorBoard):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.step = 1
-        self.writer = tf.summary.FileWriter(self.log_dir)
+        #self.writer = tf.summary.FileWriter(self.log_dir)
+        self.writer = tf.compat.v1.summary.FileWriter(self.log_dir)
 
     # Overriding this method to stop creating default log writer
     def set_model(self, model):
@@ -78,6 +113,7 @@ class ModifiedTensorBoard(TensorBoard):
 
     # Custom method for saving own metrics
     # Creates writer, writes custom metrics and closes writer
-    def update_stats(self, **stats):
-        #self._write_logs(stats, self.step)
+    def update_stats(self, **stats):#**stats
+                
+        #print(self.step,stats)
         self._write_custom_summaries(self.step,stats)

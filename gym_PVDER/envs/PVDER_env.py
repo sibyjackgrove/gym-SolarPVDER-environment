@@ -46,7 +46,7 @@ class PVDER(gym.Env,Logging,Utilities):
                            'Vdc','Ppv',
                            'Vdc_ref','Q_ref',
                            'tStart'] #,'maR','maI'
-    action_space = spaces.Discrete(3)
+    action_space = spaces.Discrete(5)
     observation_space = spaces.Box(low=-10, high=10, shape=(len(observed_quantities),),dtype=np.float32)
     
     #objective_dict = {'Q_ref_+':{'Q_ref':0.1},'Q_ref_-':{'Q_ref':-0.1}}
@@ -98,8 +98,7 @@ class PVDER(gym.Env,Logging,Utilities):
     _delQref = env_action_spec['delQref']*env_sim_spec['n_sim_time_steps_per_env_step']['default']
     _delVdcref = env_action_spec['delVdcref']*env_sim_spec['n_sim_time_steps_per_env_step']['default']
     
-    def __init__(self, n_sim_time_steps_per_env_step=None, max_sim_time=None,
-                 DISCRETE_REWARD=None, goals_list=None,
+    def __init__(self, goals_list,n_sim_time_steps_per_env_step, max_sim_time,DISCRETE_REWARD, 
                  verbosity='INFO'):   
         """
         Setup PV-DER environment variables.
@@ -114,7 +113,7 @@ class PVDER(gym.Env,Logging,Utilities):
         #Increment count to keep track of number of gym-PVDER environment instances
         PVDER.count = PVDER.count+1
         self.name = 'GymDER_'+ str(self.count)
-        self.initialize_logger()
+        self.initialize_logger(logging_level=verbosity) #Set logging level - {DEBUG,INFO,WARNING,ERROR} 
         
         self.n_sim_time_steps_per_env_step = n_sim_time_steps_per_env_step
         self.max_sim_time_user = max_sim_time
@@ -160,7 +159,9 @@ class PVDER(gym.Env,Logging,Utilities):
             self.action_calc(action)
             ConvergeFlag = False
             try:
-                solution,info,ConvergeFlag = self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,t)
+                #solution,info,ConvergeFlag = self.sim.call_ODE_solver(self.sim.ODE_model,self.sim.jac_ODE_model,self.sim.y0,t)
+                self.sim.run_simulation()
+                ConvergeFlag = self.sim.SOLVER_CONVERGENCE
                                 
             except ValueError:
                 if not ConvergeFlag:
@@ -170,15 +171,11 @@ class PVDER(gym.Env,Logging,Utilities):
                     self.RUNTIME_ERROR = True  
                     self._reward = 0.0 #Not a convergence failure
             
-            else:  #If solution converges calculate reward
-                assert ConvergeFlag,'Convergence flag should be true to calculate reward!'
-                
-                if self.sim.COLLECT_SOLUTION:
-                    self.sim.collect_solution(solution,t)                    
+            assert ConvergeFlag,'Convergence flag should be true to calculate reward!'
                     
-                self._reward = self.reward_calc()
-                self.sim.tStart = self.sim.tStop
-                self.update_reward_stats()
+            self._reward = self.reward_calc()
+            self.sim.tStart = self.sim.tStop
+            self.update_reward_stats()
             
             if self.sim.tStop >= self.max_sim_time or self.CONVERGENCE_FAILURE or self.RUNTIME_ERROR:
                 self.done = True
@@ -200,7 +197,7 @@ class PVDER(gym.Env,Logging,Utilities):
         
         assert action in self.action_space,'The action "{}" is not available in the environment action space!'.format(action)
         
-        if len(self.goals_list) == 0:   #Do nothing
+        if not self.goals_list:   #Do nothing
             print('No goals were given to agent, so no control action is being taken and action is reset to 0.')
             action = 2
         else:
@@ -208,24 +205,25 @@ class PVDER(gym.Env,Logging,Utilities):
         
         self.update_action_stats(action)
         
-        if action == 0:
-            _Qref = -self._delQref #- 0.1e3  #VAR
-            _Vdcref = -self._delVdcref #-0.1 #Volts (DC)
-        elif action == 1:
-            _Qref = self._delQref #0.1e3
-            _Vdcref = self._delVdcref #0.1 #Volts (DC)
-        elif action == 2:
-            _Qref = 0.0
-            _Vdcref = 0.0 #Volts (DC)        
-        
-        #if 'voltage_regulation' in self.goals_list or 'Q_control' in self.goals_list:
-        for action in self.env_goal_spec[goal_type]['action']['my_spec']:
-            if action == 'Q_control':
-                self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + _Qref/self.sim.PV_model.Sbase           
+        if action is not 0: #Only proceed if action is not a do nothing action
+            delQref = 0
+            delVdcref = 0
+            if action == 1:
+                delQref = self._delQref #0.1e3                
+            elif action == 2:
+                delQref = -self._delQref #0.1e3                         
+            elif action == 3:
+                delVdcref = self._delVdcref #0.1 #Volts (DC)
+            elif action == 4:
+                delVdcref = -self._delVdcref #0.1 #Volts (DC)      
 
-            if action == 'Vdc_control':
-                #elif 'power_regulation' in self.goals_list or 'Vdc_control' in self.goals_list:
-                self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + _Vdcref/self.sim.PV_model.Vdcbase            
+            #for action in self.env_goal_spec[goal_type]['action']['my_spec']:
+            #    if action == 'Q_control':
+            self.sim.PV_model.Q_ref = self.sim.PV_model.Q_ref + delQref/self.sim.PV_model.Sbase           
+
+            #    if action == 'Vdc_control':
+                    #elif 'power_regulation' in self.goals_list or 'Vdc_control' in self.goals_list:
+            self.sim.PV_model.Vdc_ref = self.sim.PV_model.Vdc_ref + delVdcref/self.sim.PV_model.Vdcbase            
     
     def reward_calc(self):
         """Calculate reward"""
@@ -234,70 +232,70 @@ class PVDER(gym.Env,Logging,Utilities):
             
         #if 'voltage_regulation' in self.goals_list:
         if goal_type == 'voltage_regulation':
-            _Qtarget = self.sim.PV_model.Q_ref
+            Qtarget = self.sim.PV_model.Q_ref
         #elif 'Q_control' in self.goals_list and 'voltage_regulation' not in self.goals_list:
         elif goal_type == 'Q_regulation':
-            _Qtarget = self.env_reward_spec['reference_values']['Q_ref']/self.sim.Sbase
+            Qtarget = self.env_reward_spec['reference_values']['Q_ref']/self.sim.Sbase
         elif goal_type == 'power_regulation':        
         #if 'power_regulation' in self.goals_list or 'Vdc_control' in self.goals_list:
-            _Vdctarget = self.sim.PV_model.Vdc_ref
-            _Ptarget = self.env_reward_spec['reference_values']['P_ref']/self.sim.Sbase
+            Vdctarget = self.sim.PV_model.Vdc_ref
+            Ptarget = self.env_reward_spec['reference_values']['P_ref']/self.sim.Sbase
         
-        _reward = []
+        rewards = []
         
-        for reward in self.env_goal_spec[goal_type]['reward']['my_spec']:
+        for reward_type in self.env_goal_spec[goal_type]['reward']['my_spec']:
             
-            if reward == 'Vdc_error':
+            if reward_type == 'Vdc_error':
             #if 'Vdc_control' in self.goals_list:
                 if self.DISCRETE_REWARD:
 
                     if abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget <= 0.02:
-                        _reward.append(1)
+                        rewards.append(1)
                     elif abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget >= 0.05:
-                        _reward.append(-5)
+                        rewards.append(-5)
                     else:
-                        _reward.append(-1)
+                        rewards.append(-1)
                 else:
-                    _reward.append(-(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2)
-            elif reward == 'Q_error':
+                    rewards.append(-(self.sim.PV_model.Vdc_ref -self.sim.PV_model.Vdc)**2)
+            elif reward_type == 'Q_error':
             #if 'Q_control' in self.goals_list:
                 if self.DISCRETE_REWARD:
-                    if _Qtarget == 0.0:
-                        _Qtarget = 1e-6
+                    if Qtarget == 0.0:
+                        Qtarget = 1e-6
                     if abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) <= 0.01:
-                        _reward.append(1)
+                        rewards.append(1)
                     elif abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) >= 0.05:
-                        _reward.append(-5)
+                        rewards.append(-5)
                     else:
-                        _reward.append(-1)
+                        rewards.append(-1)
                 else:
-                    _reward.append(-(self.sim.PV_model.S_PCC.imag - _Qtarget)**2)
-            elif reward == 'voltage_error':
+                    rewards.append(-(self.sim.PV_model.S_PCC.imag - _Qtarget)**2)
+            elif reward_type == 'voltage_error':
             #if 'voltage_regulation' in self.goals_list:
                 if self.DISCRETE_REWARD:
 
                     if abs(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)/abs(self.sim.PV_model.Vrms_ref) <= 0.01:
-                        _reward.append(1)
+                        rewards.append(1)
                     elif abs(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)/abs(self.sim.PV_model.Vrms_ref) >= 0.05:
-                        _reward.append(-5)
+                        rewards.append(-5)
                     else:
-                        _reward.append(-1)
+                        rewards.append(-1)
                 else:
-                    _reward.append(-(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)**2)                    
+                    rewards.append(-(self.sim.PV_model.Vrms - self.sim.PV_model.Vrms_ref)**2)                    
 
             #if 'power_regulation' in self.goals_list:
-            elif reward == 'power_error':
+            elif reward_type == 'power_error':
                 if self.DISCRETE_REWARD:
                     if abs(self.sim.PV_model.S_PCC.real - _Ptarget)/_Ptarget <= 0.01:
-                        _reward.append(1)
+                        rewards.append(1)
                     elif abs(self.sim.PV_model.S_PCC.real - _Ptarget)/_Ptarget >= 0.03:
-                        _reward.append(-5)
+                        rewards.append(-5)
                     else:
-                        _reward.append(-1)       
+                        rewards.append(-1)       
                 else:
-                    _reward.append(-(self.sim.PV_model.S_PCC.real - _Ptarget)**2)
+                    rewards.append(-(self.sim.PV_model.S_PCC.real - _Ptarget)**2)
 
-        return sum(_reward)
+        return sum(rewards)
     
     def initialize_environment_variables(self):
         """Initialize environment variables."""
@@ -385,7 +383,7 @@ class PVDER(gym.Env,Logging,Utilities):
         PVDER_model.DO_EXTRA_CALCULATIONS = True
         #PV_model.Vdc_EXTERNAL = True
         self.sim = DynamicSimulation(PV_model=PVDER_model,events = events,grid_model=grid_model,
-                                     LOOP_MODE = True,COLLECT_SOLUTION=True,
+                                     LOOP_MODE = False,COLLECT_SOLUTION=True,
                                      verbosity ='INFO')
         self.sim.jacFlag = True      #Provide analytical Jacobian to ODE solver
         self.sim.DEBUG_SOLVER = False #Give information on solver convergence
@@ -398,8 +396,8 @@ class PVDER(gym.Env,Logging,Utilities):
         PVDER_model.Qref_EXTERNAL = True  #Enable VAR reference manipulation through outside program
         self.sim.DEBUG_SOLVER = False #Give information on solver convergence
         self.sim.tInc = self.env_sim_spec['sim_time_step'] #1/60.0 #self.time_taken_per_step #     
-        self.sim.reset_stored_trajectories()
-        #print(self.sim.t)
+        #self.sim.reset_stored_trajectories()
+        #print(self.sim.t)        
    
     def generate_simulation_events(self):
         """Create random events."""
