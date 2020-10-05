@@ -23,8 +23,8 @@ if spec is None:
 
 #np.set_printoptions(precision=2)  #for setting number of decimal places when printing numpy arrays
 
-from pvder.DER_components_single_phase  import SolarPV_DER_SinglePhase  #Python 3 need full path to find module
-from pvder.DER_components_three_phase  import SolarPV_DER_ThreePhase
+from pvder.DER_components_single_phase  import SolarPVDERSinglePhase  #Python 3 need full path to find module
+from pvder.DER_components_three_phase  import SolarPVDERThreePhase
 from pvder.grid_components import Grid
 from pvder.simulation_events import SimulationEvents
 from pvder.simulation_utilities import SimulationResults
