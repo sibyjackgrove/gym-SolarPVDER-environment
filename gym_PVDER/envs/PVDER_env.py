@@ -185,7 +185,7 @@ class PVDER(gym.Env,Logging,Utilities):
                 elif self.CONVERGENCE_FAILURE:
                     self.logger.warning("{}:Convergence failure in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop))
                 elif self.RUNTIME_ERROR:
-                    elf.logger.warning("{}:Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop)) 
+                    self.logger.warning("{}:Run time error (due to error in code) in {} at {:.2f} - ending simulation!!!".format(self.name,self.sim.name,self.sim.tStop)) 
                     
             self._step_time = time.time() - time_start
             self.update_time_stats()
@@ -249,9 +249,9 @@ class PVDER(gym.Env,Logging,Utilities):
             #if 'Vdc_control' in self.goals_list:
                 if self.DISCRETE_REWARD:
 
-                    if abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget <= 0.02:
+                    if abs(self.sim.PV_model.Vdc - Vdctarget)/Vdctarget <= 0.02:
                         rewards.append(1)
-                    elif abs(self.sim.PV_model.Vdc - _Vdctarget)/_Vdctarget >= 0.05:
+                    elif abs(self.sim.PV_model.Vdc - Vdctarget)/Vdctarget >= 0.05:
                         rewards.append(-5)
                     else:
                         rewards.append(-1)
@@ -262,14 +262,14 @@ class PVDER(gym.Env,Logging,Utilities):
                 if self.DISCRETE_REWARD:
                     if Qtarget == 0.0:
                         Qtarget = 1e-6
-                    if abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) <= 0.01:
+                    if abs(self.sim.PV_model.S_PCC.imag - Qtarget)/abs(Qtarget) <= 0.01:
                         rewards.append(1)
-                    elif abs(self.sim.PV_model.S_PCC.imag - _Qtarget)/abs(_Qtarget) >= 0.05:
+                    elif abs(self.sim.PV_model.S_PCC.imag - Qtarget)/abs(Qtarget) >= 0.05:
                         rewards.append(-5)
                     else:
                         rewards.append(-1)
                 else:
-                    rewards.append(-(self.sim.PV_model.S_PCC.imag - _Qtarget)**2)
+                    rewards.append(-(self.sim.PV_model.S_PCC.imag - Qtarget)**2)
             elif reward_type == 'voltage_error':
             #if 'voltage_regulation' in self.goals_list:
                 if self.DISCRETE_REWARD:
@@ -286,14 +286,14 @@ class PVDER(gym.Env,Logging,Utilities):
             #if 'power_regulation' in self.goals_list:
             elif reward_type == 'power_error':
                 if self.DISCRETE_REWARD:
-                    if abs(self.sim.PV_model.S_PCC.real - _Ptarget)/_Ptarget <= 0.01:
+                    if abs(self.sim.PV_model.S_PCC.real - Ptarget)/Ptarget <= 0.01:
                         rewards.append(1)
-                    elif abs(self.sim.PV_model.S_PCC.real - _Ptarget)/_Ptarget >= 0.03:
+                    elif abs(self.sim.PV_model.S_PCC.real - Ptarget)/Ptarget >= 0.03:
                         rewards.append(-5)
                     else:
                         rewards.append(-1)       
                 else:
-                    rewards.append(-(self.sim.PV_model.S_PCC.real - _Ptarget)**2)
+                    rewards.append(-(self.sim.PV_model.S_PCC.real - Ptarget)**2)
 
         return sum(rewards)
     
@@ -369,12 +369,12 @@ class PVDER(gym.Env,Logging,Utilities):
         grid_model = Grid(events=events)
         
         if self.env_model_spec[model_type]['SinglePhase']:
-            PVDER_model = SolarPV_DER_SinglePhase(grid_model = grid_model,events=events,
+            PVDER_model = SolarPVDERSinglePhase(grid_model = grid_model,events=events,
                                                  Sinverter_rated = self.env_model_spec[model_type]['S_rated'],
                                                  standAlone = True,STEADY_STATE_INITIALIZATION=True,
                                                  verbosity = self.env_model_spec['verbosity'])
         else:
-            PVDER_model = SolarPV_DER_ThreePhase(grid_model = grid_model,events=events,
+            PVDER_model = SolarPVDERThreePhase(grid_model = grid_model,events=events,
                                                  Sinverter_rated = self.env_model_spec[model_type]['S_rated'],
                                                  standAlone = True,STEADY_STATE_INITIALIZATION=True,
                                                  verbosity = self.env_model_spec['verbosity'])                                
