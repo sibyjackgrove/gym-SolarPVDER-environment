@@ -25,6 +25,7 @@ if spec is None:
 
 from pvder.DER_components_single_phase  import SolarPVDERSinglePhase  #Python 3 need full path to find module
 from pvder.DER_components_three_phase  import SolarPVDERThreePhase
+from pvder.DER_wrapper import DERModel
 from pvder.grid_components import Grid
 from pvder.simulation_events import SimulationEvents
 from pvder.simulation_utilities import SimulationResults
@@ -50,9 +51,11 @@ class PVDER(gym.Env,Logging,Utilities):
     observation_space = spaces.Box(low=-10, high=10, shape=(len(observed_quantities),),dtype=np.float32)
     
     #objective_dict = {'Q_ref_+':{'Q_ref':0.1},'Q_ref_-':{'Q_ref':-0.1}}
-    env_model_spec = {'model_1':{'SinglePhase':True,'S_rated':10.0e3},
-                      'model_2':{'SinglePhase':False,'S_rated':50.0e3},
-                      'verbosity':'WARNING'}
+    baseDir=os.path.dirname(os.path.abspath(__file__))
+    
+    env_model_spec = {'model_1':{'DERModelType':'SinglePhase','derId':'10','configFile':baseDir[:-15]+'/config_der.json'},
+                      'model_2':{'DERModelType':'ThreePhaseUnbalanced','derId':'50','configFile':baseDir[:-15]+'/config_der.json'}
+                     }
     
     env_events_spec = {'insolation':{'t_events_start':1.0,'t_events_stop':39.0,'t_events_step':1.0,'min':85.0,'max':100.0,'ENABLE':False},
                        'voltage':{'t_events_start':1.0,'t_events_stop':39.0,'t_events_step':1.0,'min':0.98,'max':1.02,'ENABLE':True}} 
@@ -368,23 +371,18 @@ class PVDER(gym.Env,Logging,Utilities):
         events = SimulationEvents(events_spec = self.env_events_spec,verbosity ='INFO')
         grid_model = Grid(events=events)
         
-        if self.env_model_spec[model_type]['SinglePhase']:
-            PVDER_model = SolarPVDERSinglePhase(grid_model = grid_model,events=events,
-                                                 Sinverter_rated = self.env_model_spec[model_type]['S_rated'],
-                                                 standAlone = True,STEADY_STATE_INITIALIZATION=True,
-                                                 verbosity = self.env_model_spec['verbosity'])
-        else:
-            PVDER_model = SolarPVDERThreePhase(grid_model = grid_model,events=events,
-                                                 Sinverter_rated = self.env_model_spec[model_type]['S_rated'],
-                                                 standAlone = True,STEADY_STATE_INITIALIZATION=True,
-                                                 verbosity = self.env_model_spec['verbosity'])                                
+        PVDER_model = DERModel(modelType=self.env_model_spec[model_type]['DERModelType'],
+                           events=events,configFile=self.env_model_spec[model_type]['configFile'],
+                           gridModel=grid_model,
+                           derId=self.env_model_spec[model_type]['derId'],
+                           standAlone = True,steadyStateInitialization=True)   
 
-        PVDER_model.LVRT_ENABLE = False  #Disconnects PV-DER using ride through settings during voltage anomaly
-        PVDER_model.DO_EXTRA_CALCULATIONS = True
+        PVDER_model.DER_model.LVRT_ENABLE = False  #Disconnects PV-DER using ride through settings during voltage anomaly
+        PVDER_model.DER_model.DO_EXTRA_CALCULATIONS = True
         #PV_model.Vdc_EXTERNAL = True
-        self.sim = DynamicSimulation(PV_model=PVDER_model,events = events,grid_model=grid_model,
-                                     LOOP_MODE = False,COLLECT_SOLUTION=True,
-                                     verbosity ='INFO')
+        self.sim = DynamicSimulation(gridModel=grid_model,PV_model=PVDER_model.DER_model,
+                                     events = events,verbosity = 'INFO',solverType='odeint',
+                                     LOOP_MODE=False) #'odeint','ode-vode-bdf'
         self.sim.jacFlag = True      #Provide analytical Jacobian to ODE solver
         self.sim.DEBUG_SOLVER = False #Give information on solver convergence
         
@@ -456,7 +454,6 @@ class PVDER(gym.Env,Logging,Utilities):
         else:
             assert goal_spec.keys() in self.env_goal_spec.keys(), '{} is not a valid goal!'.format(goal_spec.keys())
             print('Update function is under construction!')
-    
     
     def calc_returns(self):
         """Calculate returns."""
